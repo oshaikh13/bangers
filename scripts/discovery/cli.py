@@ -81,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Continue to later intervals if one agent run fails.",
     )
     parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="Number of intervals to run concurrently. Defaults to 1.",
+    )
+    parser.add_argument(
         "--no-isolate-agent-workdir",
         action="store_true",
         help=(
@@ -161,9 +167,12 @@ def add_claude_args(parser: argparse.ArgumentParser) -> None:
     )
     group.add_argument(
         "--claude-output-format",
-        default="text",
+        default=None,
         choices=("text", "json", "stream-json"),
-        help="Output format passed to Claude.",
+        help=(
+            "Output format passed to Claude. Defaults to stream-json while "
+            "--claude-stream is enabled."
+        ),
     )
     group.add_argument(
         "--claude-max-turns",
@@ -183,7 +192,14 @@ def add_claude_args(parser: argparse.ArgumentParser) -> None:
     group.add_argument(
         "--claude-stream",
         action="store_true",
+        default=True,
         help="Stream Claude JSON events with verbose partial message deltas.",
+    )
+    group.add_argument(
+        "--no-claude-stream",
+        dest="claude_stream",
+        action="store_false",
+        help="Use Claude's non-streaming output mode unless --claude-output-format is set.",
     )
     group.add_argument(
         "--claude-verbose",
@@ -216,6 +232,8 @@ def normalize_args(args: argparse.Namespace) -> None:
     interval_minutes = args.interval_minutes or DEFAULT_INTERVAL_MINUTES
     if interval_minutes <= 0:
         raise SystemExit("--interval-minutes must be greater than 0")
+    if args.jobs <= 0:
+        raise SystemExit("--jobs must be greater than 0")
 
     args.repo_root = Path(args.repo_root).resolve()
     args.template = Path(args.template).resolve()

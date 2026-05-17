@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+CLAUDE_MODEL_ALIASES = {
+    "4.7": "claude-opus-4-7",
+    "opus-4.7": "claude-opus-4-7",
+}
+
+
 @dataclass(frozen=True)
 class ProviderCommand:
     name: str
@@ -64,8 +70,13 @@ def build_claude_command(args: argparse.Namespace, repo_root: Path) -> ProviderC
     command = [args.claude_bin]
     if args.claude_bare:
         command.append("--bare")
-    if args.claude_model:
-        command.extend(["--model", args.claude_model])
+    claude_model = (
+        CLAUDE_MODEL_ALIASES.get(args.claude_model, args.claude_model)
+        if args.claude_model
+        else None
+    )
+    if claude_model:
+        command.extend(["--model", claude_model])
     if args.claude_effort:
         command.extend(["--effort", args.claude_effort])
     if args.claude_permission_mode:
@@ -93,7 +104,7 @@ def build_claude_command(args: argparse.Namespace, repo_root: Path) -> ProviderC
         name="claude",
         command=command,
         prompt_via_stdin=True,
-        model=args.claude_model,
+        model=claude_model,
         effort=args.claude_effort,
         sandbox=args.claude_permission_mode,
     )

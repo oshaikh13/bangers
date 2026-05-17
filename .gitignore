@@ -1,3 +1,4 @@
+candidates_*
 staging/
 __pycache__/
 *.pyc
