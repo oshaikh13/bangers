@@ -154,9 +154,10 @@ def build_interval_records(
             event_i += 1
 
         if include_empty or interval_events > 0:
+            interval_index = len(records)
             records.append(
                 {
-                    "interval_index": interval_i,
+                    "interval_index": interval_index,
                     "start_ts": interval_start,
                     "end_ts": interval_end,
                     "start_utc": iso_utc(interval_start),

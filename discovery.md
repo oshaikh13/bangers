@@ -2,7 +2,7 @@
 
 Analyze the logs-indexed folder at this time:
 
-{"connector_counts": {"screen": 54}, "duration_seconds": 900.0, "end_local": "2026-04-06T13:53:44.439-07:00", "end_ts": 1775508824.439826, "end_utc": "2026-04-06T20:53:44.439Z", "event_count": 54, "interval_index": 0, "start_local": "2026-04-06T13:38:44.439-07:00", "start_ts": 1775507924.439826, "start_utc": "2026-04-06T20:38:44.439Z"}
+{candidate_row}
 
 First, carefully analyze what the user is doing during this time.
 
@@ -30,11 +30,11 @@ ALL SUGGESTIONS MUST BE SPECIFIC AND DO A SINGLE THING! Do not generate somethin
 
 Think carefully and slowly, and explore the logs thoroughly. 
 
-Write 20 possible candidates to a JSON file under the /candidates folder, ranging from most useful to least useful, with the following schema:
+Write 20 possible candidates to a JSON file called candidate_{interval_index}.json under the /candidates folder, ranging from most useful to least useful, with the following schema:
 
 [{
     "reasoning": "justification for why this task is needed and what the sources are used",
-    "title": "concrete name of the suggestion",
+    "title": "concrete name of the suggestion, start with a title",
     "usefulness": "on a scale from 1 to 10, how useful is this suggestion?",
     "task_type": "async or sync",
     "utility_type": "a or b",
