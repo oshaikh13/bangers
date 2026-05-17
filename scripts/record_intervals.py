@@ -206,21 +206,13 @@ def main() -> None:
         help="JSONL file to write interval records to. Defaults to data/log_intervals_<minutes>m.jsonl.",
     )
     parser.add_argument(
-        "--interval-minutes",
-        type=int,
-        help="Compatibility alias for the positional minutes argument.",
-    )
-    parser.add_argument(
         "--include-empty",
         action="store_true",
         help="Include intervals with no events. By default only active intervals are written.",
     )
     args = parser.parse_args()
 
-    if args.minutes is not None and args.interval_minutes is not None:
-        raise SystemExit("pass minutes either positionally or with --interval-minutes, not both")
-
-    interval_minutes = args.minutes if args.minutes is not None else args.interval_minutes
+    interval_minutes = args.minutes
     if interval_minutes is None:
         interval_minutes = 15
 

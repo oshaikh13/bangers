@@ -30,12 +30,13 @@ Don't be overly biased by artifacts created by another proactive assistant - it 
 
 Think carefully and slowly, and explore the logs thoroughly. 
 
-Write 20 possible candidates to the exact JSON file path provided by the wrapper, ranging from most useful to least useful, with the following schema:
+Write 20 possible candidates to the exact JSON file path provided by the runner, ranging from most useful to least useful, with the following schema:
 
 [{
     "reasoning": "justification for why this task is needed and what the sources are used",
     "title": "concrete name of the suggestion, start with a verb",
     "usefulness": "on a scale from 1 to 10, how useful is this suggestion?",
+    "enough_info": "on a scale from 1 to 10, do you have enough context to actually execute this task? or do you need more info?",
     "task_type": "async or sync",
     "utility_type": "a or b",
     "description": "detailed description of what is being executed"
