@@ -1,0 +1,11 @@
+staging/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+logs-indexed/
+data/
+.env
+.claude/
+data-bak/
+tinker-cookbook/
