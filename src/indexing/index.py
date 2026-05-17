@@ -33,6 +33,10 @@ CONNECTORS = ["screen", "calendar", "email", "notifications", "filesys", "audio"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_LOGS_INDEXED = REPO_ROOT / "logs-indexed"
 DEFAULT_STAGING = REPO_ROOT / "staging"
+DEFAULT_SCREENSHOTS_DIR = (
+    REPO_ROOT.parent / "powernap" / "logs" / "screen" / "labeled_screenshots"
+)
+SCREENSHOTS_DIR = "screenshots"
 
 
 def day_key(ts: float) -> str:
@@ -137,6 +141,60 @@ def load_existing_buffers(repo: Path) -> dict[str, dict[str, bytearray]]:
     return buffers
 
 
+def screenshot_source_path(raw_path: str, screenshots_dir: Path) -> Path:
+    path = Path(raw_path)
+    if path.is_absolute() and path.exists():
+        return path
+    return screenshots_dir / path.name
+
+
+def ensure_hardlink(src: Path, dst: Path) -> bool:
+    if not src.exists():
+        raise FileNotFoundError(f"screen screenshot not found: {src}")
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        if os.path.samefile(src, dst):
+            return False
+        raise RuntimeError(
+            f"refusing to overwrite existing non-hardlinked screenshot: {dst}"
+        )
+
+    try:
+        os.link(src, dst)
+    except OSError as exc:
+        raise RuntimeError(
+            "failed to hardlink screenshot; not falling back to copy because that "
+            f"can duplicate the screenshot corpus: {src} -> {dst}: {exc}"
+        ) from exc
+    return True
+
+
+def normalize_event_screenshot(
+    repo: Path,
+    event: dict,
+    screenshots_dir: Path,
+) -> bool:
+    if event.get("connector") != "screen":
+        return False
+
+    source = event.get("source")
+    if not isinstance(source, dict):
+        return False
+
+    raw_path = source.get("screenshot_path")
+    if not isinstance(raw_path, str) or not raw_path:
+        return False
+
+    filename = Path(raw_path).name
+    relative_path = f"{SCREENSHOTS_DIR}/{filename}"
+    source["screenshot_path"] = relative_path
+    return ensure_hardlink(
+        screenshot_source_path(raw_path, screenshots_dir),
+        repo / relative_path,
+    )
+
+
 def emit_data(stream, payload: bytes) -> None:
     stream.write(f"data {len(payload)}\n".encode())
     stream.write(payload)
@@ -150,7 +208,8 @@ def log(msg: str) -> None:
 def fast_import_events(repo: Path, events_iter,
                        buffers: dict[str, dict[str, bytearray]],
                        parent_branch_exists: bool, total: int,
-                       progress_every: int) -> tuple[int, dict[str, float]]:
+                       progress_every: int,
+                       screenshots_dir: Path) -> tuple[int, dict[str, float]]:
     """Stream commits to git fast-import. Returns (count, last_ts_per_connector)."""
     proc = subprocess.Popen(
         ["git", "-C", str(repo), "fast-import", "--quiet", "--date-format=raw"],
@@ -163,11 +222,14 @@ def fast_import_events(repo: Path, events_iter,
     blob_mark = 0
     last_ts: dict[str, float] = {}
     per_connector_n: Counter = Counter()
+    screenshot_links = 0
     has_parent = parent_branch_exists
     start = time.monotonic()
 
     try:
         for event in events_iter:
+            if normalize_event_screenshot(repo, event, screenshots_dir):
+                screenshot_links += 1
             connector = event["connector"]
             day = day_key(event["ts"])
             buf = buffers[connector].setdefault(day, bytearray())
@@ -229,6 +291,7 @@ def fast_import_events(repo: Path, events_iter,
     log(f"  fast-import done: {n} commits in {fmt_duration(elapsed)} "
         f"({n / elapsed if elapsed > 0 else 0:.1f}/s)")
     log(f"  per-connector: {dict(per_connector_n)}")
+    log(f"  screenshot hardlinks created: {screenshot_links}")
 
     return n, last_ts
 
@@ -242,7 +305,7 @@ def write_root_commit(repo: Path) -> None:
     assert proc.stdin is not None
     s = proc.stdin
 
-    gitignore = b".indexer-cursor.json\n"
+    gitignore = b".indexer-cursor.json\n/screenshots/\n"
     s.write(b"blob\nmark :1\n")
     emit_data(s, gitignore)
 
@@ -282,10 +345,19 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--progress-every", type=int, default=1000,
                         help="Log progress every N commits (default 1000).")
+    parser.add_argument(
+        "--screen-screenshots-dir",
+        type=Path,
+        default=Path(
+            os.environ.get("SCREEN_SCREENSHOTS_DIR", str(DEFAULT_SCREENSHOTS_DIR))
+        ),
+        help="Directory containing source screen PNGs to hardlink into logs-indexed/screenshots.",
+    )
     args = parser.parse_args()
 
     repo = args.logs_indexed_dir
     staging = args.staging_dir
+    screenshots_dir = args.screen_screenshots_dir
 
     init_repo(repo)
     branch_exists = bool(
@@ -300,6 +372,7 @@ def main() -> None:
     cursor = load_cursor(repo)
     log(f"repo:    {repo}")
     log(f"staging: {staging}")
+    log(f"screenshots: {screenshots_dir}")
     log(f"cursor:  {cursor}")
 
     log("counting pending events per connector...")
@@ -324,6 +397,7 @@ def main() -> None:
         parent_branch_exists=True,
         total=total,
         progress_every=args.progress_every,
+        screenshots_dir=screenshots_dir,
     )
 
     # Sync working tree to new HEAD (fast-import only updates refs)

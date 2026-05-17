@@ -13,11 +13,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 from .intervals import select_rows
 from .io import append_jsonl, read_jsonl
 from .process import run_command
 from .prompts import load_template, render_prompt
 from .providers import build_provider_command
+
+SCREENSHOTS_DIR = "screenshots"
 
 
 @dataclass(frozen=True)
@@ -30,17 +34,100 @@ class IntervalResult:
     created_candidate: bool
 
 
-def copy_logs_indexed(src: Path, dst: Path) -> None:
+def iter_files(root: Path):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for filename in sorted(filenames):
+            path = Path(dirpath) / filename
+            yield path, path.relative_to(root)
+
+
+def count_files(root: Path) -> int:
+    return sum(1 for _ in iter_files(root))
+
+
+def hardlink_screenshot_tree(
+    src: Path,
+    dst: Path,
+    interval_index: int,
+    progress_every: int,
+) -> None:
+    total = count_files(src)
+    dst.mkdir(parents=True, exist_ok=True)
+    miniters = progress_every or None
+    files = iter_files(src)
+    for src_file, rel_path in tqdm(
+        files,
+        total=total,
+        desc=f"startup interval {interval_index}",
+        unit="img",
+        miniters=miniters,
+        mininterval=0.5,
+        leave=False,
+        file=sys.stderr,
+    ):
+        dst_file = dst / rel_path
+        dst_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.link(src_file, dst_file)
+        except OSError as exc:
+            raise RuntimeError(
+                "failed to hardlink screenshots into isolated discovery "
+                "workdir; not falling back to copy because that can "
+                f"duplicate the screenshot corpus: {src} -> {dst}: {exc}"
+            ) from exc
+
+
+def symlink_screenshot_tree(src: Path, dst: Path, interval_index: int) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(src, dst, target_is_directory=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"failed to symlink screenshots into isolated discovery workdir: "
+            f"{src} -> {dst}: {exc}"
+        ) from exc
+    tqdm.write(
+        f"startup interval {interval_index}: symlinked screenshots directory",
+        file=sys.stderr,
+    )
+
+
+def copy_logs_indexed(src: Path, dst: Path, args: argparse.Namespace,
+                      interval_index: int) -> None:
     if not src.exists():
         raise SystemExit(f"logs-indexed not found: {src}")
-    shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".git"))
+
+    shutil.copytree(
+        src,
+        dst,
+        ignore=shutil.ignore_patterns(".git", SCREENSHOTS_DIR),
+    )
+
+    src_screenshots = src / SCREENSHOTS_DIR
+    if src_screenshots.exists():
+        dst_screenshots = dst / SCREENSHOTS_DIR
+        if args.screenshot_link_mode == "symlink":
+            symlink_screenshot_tree(src_screenshots, dst_screenshots, interval_index)
+        else:
+            hardlink_screenshot_tree(
+                src_screenshots,
+                dst_screenshots,
+                interval_index,
+                args.startup_progress_every,
+            )
 
 
 def create_isolated_workdir(args: argparse.Namespace, interval_index: int) -> Path:
     workdir = Path(
         tempfile.mkdtemp(prefix=f"discovery-{args.provider}-{interval_index}-")
     ).resolve()
-    copy_logs_indexed(args.repo_root / "logs-indexed", workdir / "logs-indexed")
+    copy_logs_indexed(
+        args.repo_root / "logs-indexed",
+        workdir / "logs-indexed",
+        args,
+        interval_index,
+    )
     (workdir / "agent-output").mkdir()
     subprocess.run(["git", "init", "-q"], cwd=workdir, check=True)
     return workdir

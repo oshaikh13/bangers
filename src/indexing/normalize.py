@@ -34,9 +34,11 @@ def ts_to_iso(ts: float) -> str:
 def normalize_screen(source: dict) -> dict:
     if "start_time" in source:
         source["start_time_local"] = source.pop("start_time")
-    # Heavy fields kept in powernap/logs/screen/labels.jsonl; trim from index.
+    screenshot_path = source.get("screenshot_path")
+    if isinstance(screenshot_path, str) and screenshot_path:
+        source["screenshot_path"] = f"screenshots/{Path(screenshot_path).name}"
+    # Heavy raw event streams stay in powernap/logs/screen/labels.jsonl.
     source.pop("raw_events", None)
-    source.pop("screenshot_path", None)
     return source
 
 

@@ -6,7 +6,9 @@ Analyze the logs-indexed folder at this time:
 
 First, carefully analyze what the user is doing during this time, minute by minute.
 
-Second, identify all the places where an AI assistant could've proactively helped. You can look into the future to identify what the user actually does or doesn't do, and personalize suggestions based on what the user has done in the past. Look for signs of frustration (distraction, procrastination, disorganization, etc.)
+Second, identify all the places where an AI assistant could've proactively helped. You can look into the future to identify what the user actually does or doesn't do, and personalize suggestions based on what the user has done in the past. You can look for signs of frustration (distraction, procrastination, disorganization, etc. by analyzing mouse movement, app switching, or other context clues).
+
+Screen rows may include `source.screenshot_path`. These paths are relative to `logs-indexed/`, for example `logs-indexed/screenshots/2026-05-12_15-03-12-864819.png`. When text summaries or dense captions are insufficient, inspect the relevant screenshots directly and use them as visual evidence.
 
 ## Types of Suggestions
 
@@ -16,7 +18,7 @@ Generate a range of suggestions. The kind of suggestion I want are things that:
 
 or
 
-(b) Something that I would never even think to do / search, but that information would unlock a lot of utility for me. So things like researching or making connections; or getting the right context for a question or meeting I have, etc.
+(b) Something that I wouldn't think to do or clearly don't have time to do, but that information would unlock a lot of utility for me. So things like researching or making connections for something upcoming; or getting the right context for a question or meeting I have, etc.
 
 Once you have a draft set of suggestions, look carefully through future and past logs, widening your search far *beyond* the selected range.
 
@@ -28,13 +30,11 @@ ALL SUGGESTIONS MUST BE SPECIFIC AND DO A SINGLE THING! Do not generate somethin
 
 Don't be overly biased by artifacts created by another proactive assistant - it could be that the user did NOT find these suggestions useful, if they never used them. 
 
-Suggestions CANNOT take irreversible action (e.g. send an email, create an invite, etc; but they can SUGGEST doing such a thing.)
-
-Suggestions CANNOT directly edit the underlying data / settings for various apps.
+Suggestions cannot take irreversible action (e.g. send an email, create an invite, etc; but they can SUGGEST doing such a thing.)
 
 ## Format
 
-Think carefully and slowly, and explore the logs thoroughly. 
+Think carefully and slowly, and explore the logs thoroughly. If you need more detail, read the relevant raw screenshots from the paths attached to screen rows.
 
 Write 20 possible candidates to the exact JSON file path provided by the runner, ranging from most useful to least useful, with the following schema:
 

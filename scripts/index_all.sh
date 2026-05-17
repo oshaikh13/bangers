@@ -9,6 +9,7 @@
 #   POWERNAP_LOGS_DIR   — where powernap connector logs live (default: ../powernap/logs)
 #   STAGING_DIR         — intermediate normalized output  (default: staging/)
 #   LOGS_INDEXED_DIR    — final git-indexed output         (default: logs-indexed/)
+#   SCREEN_SCREENSHOTS_DIR — source screen PNG directory   (default: ../powernap/logs/screen/labeled_screenshots)
 
 set -uo pipefail
 

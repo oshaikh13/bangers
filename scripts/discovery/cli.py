@@ -99,6 +99,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not delete temporary isolated workdirs after each run.",
     )
+    parser.add_argument(
+        "--screenshot-link-mode",
+        choices=("hardlink", "symlink"),
+        default="hardlink",
+        help=(
+            "How isolated workdirs expose logs-indexed/screenshots. hardlink keeps "
+            "files inside the workdir; symlink is faster but points outside it."
+        ),
+    )
+    parser.add_argument(
+        "--startup-progress-every",
+        type=int,
+        default=5000,
+        help=(
+            "Minimum screenshot files between tqdm startup progress refreshes. "
+            "Use 0 to let tqdm choose."
+        ),
+    )
 
     add_codex_args(parser)
     add_claude_args(parser)
@@ -234,6 +252,8 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--interval-minutes must be greater than 0")
     if args.jobs <= 0:
         raise SystemExit("--jobs must be greater than 0")
+    if args.startup_progress_every < 0:
+        raise SystemExit("--startup-progress-every must be non-negative")
 
     args.repo_root = Path(args.repo_root).resolve()
     args.template = Path(args.template).resolve()
