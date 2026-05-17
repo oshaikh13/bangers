@@ -1,0 +1,1 @@
+python3 scripts/run_discovery.py --provider claude --interval-indexes 0-1 --jobs 2

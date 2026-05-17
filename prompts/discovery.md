@@ -6,9 +6,9 @@ Analyze the logs-indexed folder at this time:
 
 First, carefully analyze what the user is doing during this time, minute by minute.
 
-Second, identify all the places where an AI assistant could've proactively helped. You can look into the future to identify what the user actually does or doesn't do, and personalize suggestions based on what the user has done in the past.
+Second, identify all the places where an AI assistant could've proactively helped. You can look into the future to identify what the user actually does or doesn't do, and personalize suggestions based on what the user has done in the past. Look for signs of frustration (distraction, procrastination, disorganization, etc.)
 
-## Rules
+## Types of Suggestions
 
 Generate a range of suggestions. The kind of suggestion I want are things that:
 
@@ -22,9 +22,15 @@ Once you have a draft set of suggestions, look carefully through future and past
 
 Additionally, categorize if you think these suggestions could run in the background, asynchronously, and surfaced later; or should be foregrounded and shown immediately to the user.
 
+## Priorities
+
 ALL SUGGESTIONS MUST BE SPECIFIC AND DO A SINGLE THING! Do not generate something generic that could be applied to many things (for example: DO NOT generate "draft preparation for meeting" - mention the specific meeting with a SINGLE entity).
 
 Don't be overly biased by artifacts created by another proactive assistant - it could be that the user did NOT find these suggestions useful, if they never used them. 
+
+Suggestions CANNOT take irreversible action (e.g. send an email, create an invite, etc; but they can SUGGEST doing such a thing.)
+
+Suggestions CANNOT directly edit the underlying data / settings for various apps.
 
 ## Format
 
@@ -33,9 +39,10 @@ Think carefully and slowly, and explore the logs thoroughly.
 Write 20 possible candidates to the exact JSON file path provided by the runner, ranging from most useful to least useful, with the following schema:
 
 [{
+    "context": "describe the context that lead up to this suggestion to remind the user what they were doing",
     "reasoning": "justification for why this task is needed and what the sources are used",
-    "title": "concrete name of the suggestion, start with a verb",
-    "usefulness": "on a scale from 1 to 10, how useful is this suggestion?",
+    "title": "concrete and specific name of the suggestion. start with a verb",
+    "usefulness": "on a scale from 1 to 10, how useful is this suggestion? how much frustration will it save the user?",
     "enough_info": "on a scale from 1 to 10, do you have enough context to actually execute this task? or do you need more info?",
     "task_type": "async or sync",
     "utility_type": "a or b",
