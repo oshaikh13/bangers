@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record active 15-minute intervals across the indexed log timespan.
+"""Record active intervals across the indexed log timespan.
 
 Scans logs-indexed/**/*.jsonl for canonical rows with `ts` or `ts_iso`, finds
 the earliest and latest event timestamps, and writes one JSONL row per interval
@@ -26,11 +26,13 @@ except ModuleNotFoundError:
 
 LOCAL_TZ_NAME = "America/Los_Angeles"
 LOCAL_TZ = ZoneInfo(LOCAL_TZ_NAME) if ZoneInfo else None
-INTERVAL_SECONDS = 15 * 60
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LOGS_INDEXED = REPO_ROOT / "logs-indexed"
-DEFAULT_OUTPUT = REPO_ROOT / "data" / "log_intervals_15m.jsonl"
+
+
+def default_output_path(interval_minutes: int) -> Path:
+    return REPO_ROOT / "data" / f"log_intervals_{interval_minutes}m.jsonl"
 
 
 def iso_utc(ts: float) -> str:
@@ -184,6 +186,12 @@ def write_jsonl(path: Path, records: list[dict]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "minutes",
+        type=int,
+        nargs="?",
+        help="Interval size in minutes. Defaults to 15.",
+    )
+    parser.add_argument(
         "--logs-indexed-dir",
         type=Path,
         default=Path(os.environ.get("LOGS_INDEXED_DIR", str(DEFAULT_LOGS_INDEXED))),
@@ -192,14 +200,15 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(os.environ.get("INTERVALS_OUTPUT", str(DEFAULT_OUTPUT))),
-        help="JSONL file to write interval records to.",
+        default=Path(os.environ["INTERVALS_OUTPUT"])
+        if os.environ.get("INTERVALS_OUTPUT")
+        else None,
+        help="JSONL file to write interval records to. Defaults to data/log_intervals_<minutes>m.jsonl.",
     )
     parser.add_argument(
         "--interval-minutes",
         type=int,
-        default=15,
-        help="Interval size in minutes.",
+        help="Compatibility alias for the positional minutes argument.",
     )
     parser.add_argument(
         "--include-empty",
@@ -208,27 +217,36 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.interval_minutes <= 0:
-        raise SystemExit("--interval-minutes must be greater than 0")
+    if args.minutes is not None and args.interval_minutes is not None:
+        raise SystemExit("pass minutes either positionally or with --interval-minutes, not both")
+
+    interval_minutes = args.minutes if args.minutes is not None else args.interval_minutes
+    if interval_minutes is None:
+        interval_minutes = 15
+
+    if interval_minutes <= 0:
+        raise SystemExit("minutes must be greater than 0")
     if not args.logs_indexed_dir.exists():
         raise SystemExit(f"logs indexed directory not found: {args.logs_indexed_dir}")
 
+    output = args.output or default_output_path(interval_minutes)
     events = load_events(args.logs_indexed_dir)
     if not events:
         raise SystemExit(f"no timestamped events found in {args.logs_indexed_dir}")
 
     records = build_interval_records(
         events,
-        args.interval_minutes * 60,
+        interval_minutes * 60,
         include_empty=args.include_empty,
     )
-    write_jsonl(args.output, records)
+    write_jsonl(output, records)
 
     print(f"events: {len(events)}")
     print(f"active intervals: {len(records)}")
+    print(f"interval minutes: {interval_minutes}")
     print(f"start: {records[0]['start_utc']} ({records[0]['start_local']})")
     print(f"end: {records[-1]['end_utc']} ({records[-1]['end_local']})")
-    print(f"wrote: {args.output}")
+    print(f"wrote: {output}")
 
 
 if __name__ == "__main__":

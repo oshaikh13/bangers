@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run discovery.md against interval JSONL rows with `codex exec`.
+"""Run prompts/discovery.md against interval JSONL rows with `codex exec`.
 
 Each input JSONL line is loaded as an interval record. The script replaces
 `{candidate_row}` and `{interval_index}` in the prompt template, then invokes
-Codex non-interactively. By default, each run asks Codex to write:
+Codex non-interactively. Each run asks Codex to write:
 
     candidates/candidate_<interval_index>.json
 """
@@ -14,16 +14,26 @@ import argparse
 import json
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_INTERVALS = REPO_ROOT / "data" / "log_intervals_15m.jsonl"
-DEFAULT_TEMPLATE = REPO_ROOT / "discovery.md"
+DEFAULT_INTERVAL_MINUTES = 15
+DEFAULT_TEMPLATE = REPO_ROOT / "prompts" / "discovery.md"
 DEFAULT_CANDIDATES_DIR = REPO_ROOT / "candidates"
-DEFAULT_RUN_LOG = REPO_ROOT / "candidates" / "codex_exec_runs.jsonl"
+
+
+def default_intervals_path(interval_minutes: int) -> Path:
+    return REPO_ROOT / "data" / f"log_intervals_{interval_minutes}m.jsonl"
+
+
+def default_candidates_dir(interval_minutes: int, interval_minutes_was_given: bool) -> Path:
+    if not interval_minutes_was_given and interval_minutes == DEFAULT_INTERVAL_MINUTES:
+        return DEFAULT_CANDIDATES_DIR
+    return REPO_ROOT / f"candidates_{interval_minutes}m"
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -98,7 +108,7 @@ def build_codex_command(args: argparse.Namespace) -> list[str]:
         "-m",
         args.model,
         "-c",
-        f'reasoning_effort="{args.reasoning_effort}"',
+        f'model_reasoning_effort="{args.reasoning_effort}"',
         "--sandbox",
         args.sandbox,
         "--cd",
@@ -118,13 +128,31 @@ def build_codex_command(args: argparse.Namespace) -> list[str]:
     return command
 
 
+def stream_pipe(pipe, log_file, console, prefix: str) -> None:
+    try:
+        for line in iter(pipe.readline, ""):
+            log_file.write(line)
+            log_file.flush()
+            console.write(f"{prefix}{line}")
+            console.flush()
+    finally:
+        pipe.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--interval-minutes",
+        type=int,
+        help=(
+            "Interval size used to derive default paths. For example, 30 uses "
+            "data/log_intervals_30m.jsonl and candidates_30m/."
+        ),
+    )
+    parser.add_argument(
         "--intervals",
         type=Path,
-        default=DEFAULT_INTERVALS,
-        help="Input JSONL of interval rows.",
+        help="Input JSONL of interval rows. Defaults to data/log_intervals_<minutes>m.jsonl.",
     )
     parser.add_argument(
         "--template",
@@ -141,14 +169,12 @@ def main() -> int:
     parser.add_argument(
         "--candidates-dir",
         type=Path,
-        default=DEFAULT_CANDIDATES_DIR,
         help="Directory where candidate_<interval_index>.json files are expected.",
     )
     parser.add_argument(
         "--run-log",
         type=Path,
-        default=DEFAULT_RUN_LOG,
-        help="JSONL run ledger written by this wrapper.",
+        help="JSONL run ledger written by this wrapper. Defaults inside --candidates-dir.",
     )
     parser.add_argument(
         "--interval-indexes",
@@ -220,6 +246,20 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    interval_minutes_was_given = args.interval_minutes is not None
+    interval_minutes = args.interval_minutes or DEFAULT_INTERVAL_MINUTES
+    if interval_minutes <= 0:
+        raise SystemExit("--interval-minutes must be greater than 0")
+
+    if args.intervals is None:
+        args.intervals = default_intervals_path(interval_minutes)
+    if args.candidates_dir is None:
+        args.candidates_dir = default_candidates_dir(
+            interval_minutes, interval_minutes_was_given
+        )
+    if args.run_log is None:
+        args.run_log = args.candidates_dir / "codex_exec_runs.jsonl"
+
     args.repo_root = args.repo_root.resolve()
     args.intervals = args.intervals.resolve()
     args.template = args.template.resolve()
@@ -275,28 +315,50 @@ def main() -> int:
 
         started_at = datetime.now(timezone.utc).isoformat()
         print(f"run interval {interval_index} -> {candidate_path}", file=sys.stderr)
-        proc = subprocess.run(
-            command,
-            cwd=args.repo_root,
-            input=prompt,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        completed_at = datetime.now(timezone.utc).isoformat()
-
         stdout_path = args.candidates_dir / f"candidate_{interval_index}.stdout.log"
         stderr_path = args.candidates_dir / f"candidate_{interval_index}.stderr.log"
-        stdout_path.write_text(proc.stdout, encoding="utf-8")
-        stderr_path.write_text(proc.stderr, encoding="utf-8")
+        with stdout_path.open("w", encoding="utf-8") as stdout_log, stderr_path.open(
+            "w", encoding="utf-8"
+        ) as stderr_log:
+            proc = subprocess.Popen(
+                command,
+                cwd=args.repo_root,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+            assert proc.stdin is not None
+            assert proc.stdout is not None
+            assert proc.stderr is not None
+
+            stdout_thread = threading.Thread(
+                target=stream_pipe,
+                args=(proc.stdout, stdout_log, sys.stdout, f"[{interval_index} stdout] "),
+                daemon=True,
+            )
+            stderr_thread = threading.Thread(
+                target=stream_pipe,
+                args=(proc.stderr, stderr_log, sys.stderr, f"[{interval_index} stderr] "),
+                daemon=True,
+            )
+            stdout_thread.start()
+            stderr_thread.start()
+
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+            returncode = proc.wait()
+            stdout_thread.join()
+            stderr_thread.join()
+        completed_at = datetime.now(timezone.utc).isoformat()
 
         record = {
             "interval_index": interval_index,
             "candidate_path": str(candidate_path),
             "stdout_path": str(stdout_path),
             "stderr_path": str(stderr_path),
-            "returncode": proc.returncode,
+            "returncode": returncode,
             "started_at": started_at,
             "completed_at": completed_at,
             "model": args.model,
@@ -305,15 +367,15 @@ def main() -> int:
         }
         append_run_log(args.run_log, record)
 
-        if proc.returncode != 0:
+        if returncode != 0:
             failures += 1
             print(
-                f"interval {interval_index} failed with exit code {proc.returncode}; "
+                f"interval {interval_index} failed with exit code {returncode}; "
                 f"see {stderr_path}",
                 file=sys.stderr,
             )
             if not args.continue_on_error:
-                return proc.returncode
+                return returncode
 
         if not candidate_path.exists():
             failures += 1
