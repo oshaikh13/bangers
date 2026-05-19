@@ -4,7 +4,9 @@ import argparse
 from pathlib import Path
 
 from .paths import (
+    DEFAULT_COMBINE_TEMPLATE,
     DEFAULT_INTERVAL_MINUTES,
+    DEFAULT_QUESTIONS_TEMPLATE,
     DEFAULT_TEMPLATE,
     REPO_ROOT,
     default_candidates_dir,
@@ -15,7 +17,27 @@ from .runner import run
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run prompts/discovery.md against interval JSONL rows."
+        description=(
+            "Run discovery interval prompts, combine candidate suggestions, "
+            "or generate discovery questions with Codex or Claude."
+        )
+    )
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--combine",
+        action="store_true",
+        help=(
+            "Run prompts/combine.md once over --candidates-dir and write "
+            "combined.json instead of running interval discovery."
+        ),
+    )
+    mode_group.add_argument(
+        "--questions",
+        action="store_true",
+        help=(
+            "Run prompts/discovery_questions.md once per selected element in "
+            "combined.json and write question/answer JSON files."
+        ),
     )
     parser.add_argument(
         "--provider",
@@ -38,8 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--template",
-        default=str(DEFAULT_TEMPLATE),
-        help="Prompt template containing {candidate_row} and {interval_index}.",
+        help=(
+            "Prompt template. Defaults to prompts/discovery.md, "
+            "prompts/combine.md with --combine, or "
+            "prompts/discovery_questions.md with --questions."
+        ),
     )
     parser.add_argument(
         "--repo-root",
@@ -55,15 +80,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSONL run ledger written by this runner. Defaults inside --candidates-dir.",
     )
     parser.add_argument(
+        "--questions-dir",
+        help=(
+            "Directory for --questions outputs. Defaults to "
+            "<candidates-dir>/discovery_questions."
+        ),
+    )
+    parser.add_argument(
         "--interval-indexes",
         help="Comma-separated interval indexes or ranges to run, e.g. `0,3,10-12`.",
+    )
+    parser.add_argument(
+        "--combined-indexes",
+        help=(
+            "With --questions, comma-separated zero-based combined.json indexes "
+            "or ranges to run, e.g. `0,3,10-12`."
+        ),
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
     parser.add_argument("--limit", type=int, help="Maximum number of rows to run.")
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Run even if candidate_<interval_index>.json already exists.",
+        help=(
+            "Run even if the expected output already exists "
+            "(candidate_<interval_index>.json, combined.json, or "
+            "discovery_questions/question_<combined_index>.json)."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -78,13 +121,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--continue-on-error",
         action="store_true",
-        help="Continue to later intervals if one agent run fails.",
+        help="Continue to later selected items if one agent run fails.",
     )
     parser.add_argument(
         "--jobs",
         type=int,
         default=1,
-        help="Number of intervals to run concurrently. Defaults to 1.",
+        help="Number of selected items to run concurrently. Defaults to 1.",
     )
     parser.add_argument(
         "--no-isolate-agent-workdir",
@@ -254,9 +297,22 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--jobs must be greater than 0")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
+    if args.questions and args.interval_indexes:
+        raise SystemExit(
+            "--interval-indexes selects discovery intervals; use "
+            "--combined-indexes with --questions"
+        )
+    if args.combined_indexes and not args.questions:
+        raise SystemExit("--combined-indexes requires --questions")
 
     args.repo_root = Path(args.repo_root).resolve()
-    args.template = Path(args.template).resolve()
+    if args.questions:
+        default_template = DEFAULT_QUESTIONS_TEMPLATE
+    elif args.combine:
+        default_template = DEFAULT_COMBINE_TEMPLATE
+    else:
+        default_template = DEFAULT_TEMPLATE
+    args.template = Path(args.template or default_template).resolve()
 
     if args.intervals is None:
         args.intervals = default_intervals_path(interval_minutes)
@@ -265,6 +321,11 @@ def normalize_args(args: argparse.Namespace) -> None:
         args.candidates_dir = Path(args.candidates_dir)
     else:
         args.candidates_dir = default_candidates_dir(args.provider, interval_minutes)
+
+    if args.questions_dir:
+        args.questions_dir = Path(args.questions_dir)
+    else:
+        args.questions_dir = args.candidates_dir / "discovery_questions"
 
     if args.run_log:
         args.run_log = Path(args.run_log)
@@ -281,6 +342,7 @@ def normalize_args(args: argparse.Namespace) -> None:
 
     args.intervals = args.intervals.resolve()
     args.candidates_dir = args.candidates_dir.resolve()
+    args.questions_dir = args.questions_dir.resolve()
     args.run_log = args.run_log.resolve()
 
 
