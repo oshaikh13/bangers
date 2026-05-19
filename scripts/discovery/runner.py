@@ -220,6 +220,7 @@ def run_one_interval(
     completed_at = datetime.now(timezone.utc).isoformat()
     record = {
         "provider": provider.name,
+        "discovery_kind": args.discovery_kind,
         "interval_index": interval_index,
         "candidate_path": str(candidate_path),
         "agent_candidate_path": str(agent_candidate_path),
@@ -405,6 +406,7 @@ def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
     record = {
         "provider": provider.name,
         "mode": "combine",
+        "discovery_kind": args.discovery_kind,
         "candidates_dir": str(args.candidates_dir),
         "combined_path": str(combined_path),
         "candidate_count": len(files),
@@ -443,6 +445,7 @@ def run_combine(args: argparse.Namespace) -> int:
 
     print(f"selected candidate files: {len(files)}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
+    print(f"discovery kind: {args.discovery_kind}", file=sys.stderr)
     if args.dry_run:
         print_combine_dry_run(args, template)
         return 0
@@ -530,6 +533,7 @@ def run_questions_once(
     record = {
         "provider": provider.name,
         "mode": "questions",
+        "discovery_kind": args.discovery_kind,
         "candidates_dir": str(args.candidates_dir),
         "combined_path": str(args.candidates_dir / "combined.json"),
         "combined_index": combined_index,
@@ -577,6 +581,7 @@ def run_questions(args: argparse.Namespace) -> int:
 
     print(f"selected combined elements: {len(selected)}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
+    print(f"discovery kind: {args.discovery_kind}", file=sys.stderr)
     print(f"jobs: {args.jobs}", file=sys.stderr)
 
     selected_to_run: list[tuple[int, dict[str, Any]]] = []
@@ -669,6 +674,7 @@ def run_discovery(args: argparse.Namespace) -> int:
     args.candidates_dir.mkdir(parents=True, exist_ok=True)
     print(f"selected rows: {len(rows)}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
+    print(f"discovery kind: {args.discovery_kind}", file=sys.stderr)
     print(f"jobs: {args.jobs}", file=sys.stderr)
     if not args.no_isolate_agent_workdir:
         print(

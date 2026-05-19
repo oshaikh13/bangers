@@ -5,9 +5,10 @@ from pathlib import Path
 
 from .paths import (
     DEFAULT_COMBINE_TEMPLATE,
+    DEFAULT_DISCOVERY_KIND,
+    DEFAULT_DISCOVERY_TEMPLATES,
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_QUESTIONS_TEMPLATE,
-    DEFAULT_TEMPLATE,
     REPO_ROOT,
     default_candidates_dir,
     default_intervals_path,
@@ -46,6 +47,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Agent CLI used for each discovery run.",
     )
     parser.add_argument(
+        "--discovery-kind",
+        "--discovery-prompt",
+        choices=tuple(DEFAULT_DISCOVERY_TEMPLATES),
+        default=DEFAULT_DISCOVERY_KIND,
+        help=(
+            "Discovery prompt to run. Defaults to goals. "
+            "Ignored by --combine and --questions except for deriving the "
+            "default candidates directory, e.g. candidates_codex_goals_15m "
+            "or candidates_codex_suggestions_15m."
+        ),
+    )
+    parser.add_argument(
         "--interval-minutes",
         type=int,
         help=(
@@ -61,8 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--template",
         help=(
-            "Prompt template. Defaults to prompts/discovery.md, "
-            "prompts/combine.md with --combine, or "
+            "Prompt template. Defaults to prompts/discovery_<kind>.md for "
+            "discovery, prompts/combine.md with --combine, or "
             "prompts/discovery_questions.md with --questions."
         ),
     )
@@ -311,7 +324,7 @@ def normalize_args(args: argparse.Namespace) -> None:
     elif args.combine:
         default_template = DEFAULT_COMBINE_TEMPLATE
     else:
-        default_template = DEFAULT_TEMPLATE
+        default_template = DEFAULT_DISCOVERY_TEMPLATES[args.discovery_kind]
     args.template = Path(args.template or default_template).resolve()
 
     if args.intervals is None:
@@ -320,7 +333,11 @@ def normalize_args(args: argparse.Namespace) -> None:
     if args.candidates_dir:
         args.candidates_dir = Path(args.candidates_dir)
     else:
-        args.candidates_dir = default_candidates_dir(args.provider, interval_minutes)
+        args.candidates_dir = default_candidates_dir(
+            args.provider,
+            interval_minutes,
+            args.discovery_kind,
+        )
 
     if args.questions_dir:
         args.questions_dir = Path(args.questions_dir)
