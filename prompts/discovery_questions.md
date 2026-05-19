@@ -1,6 +1,6 @@
 # Task
 
-Your job is to generate useful question/answer pairs about the user that would help fulfill a task. Here is a combined_json_element with a parent suggestion:
+Your job is to generate useful question/answer pairs about the user that would help fulfill a user's goal. Here is a combined_json_element with a parent goal:
 
 {combined_json_element}
 
@@ -10,7 +10,7 @@ Do not generate questions for their own sake. Include only question/answer pairs
 
 ## How to think
 
-First, understand the combined suggestion as a concrete task:
+First, understand the combined goal as a concrete task:
 - What useful work is the assistant expected to do?
 - What user context would change the best output?
 - What assumptions would be risky, personal, preference-sensitive, or hard to infer from logs?
