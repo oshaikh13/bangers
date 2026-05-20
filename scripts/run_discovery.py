@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run discovery, combine, or question-generation prompts with Codex or Claude."""
+"""Run discovery pipeline stages with Codex or Claude."""
 
 from __future__ import annotations
 

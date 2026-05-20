@@ -56,15 +56,34 @@ def render_combine_prompt(
     )
 
 
-def render_questions_prompt(
+def render_bangers_prompt(
     template: str,
     combined_json_element: dict[str, Any],
-    questions_path: Path,
+    bangers_path: Path,
     provider: str,
 ) -> str:
     rendered = template.replace(
         "{combined_json_element}",
         json.dumps(combined_json_element, ensure_ascii=False, sort_keys=True),
+    )
+    return (
+        rendered
+        + "\n\n"
+        + f"For this {provider} run, write the JSON file to this exact path: "
+        + str(bangers_path)
+        + "\n"
+    )
+
+
+def render_questions_prompt(
+    template: str,
+    suggestion_json: dict[str, Any],
+    questions_path: Path,
+    provider: str,
+) -> str:
+    rendered = template.replace(
+        "{suggestion_json}",
+        json.dumps(suggestion_json, ensure_ascii=False, sort_keys=True),
     )
     return (
         rendered

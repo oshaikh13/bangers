@@ -95,7 +95,6 @@ Use this shape:
       "goal": string,
       "opportunities": [
         {
-          "title": string,
           "timestamp": string,
           "trigger_evidence": [string],
           "why_now": string,
@@ -116,7 +115,6 @@ Minimal example:
       "goal": "Choose an inference provider for a new eval pipeline",
       "opportunities": [
         {
-          "title": "Compare providers after repeated pricing and docs searches",
           "timestamp": "2025-02-14T15:20:00",
           "trigger_evidence": [
             "User opened Together AI, Fireworks, Groq, Replicate, and OpenRouter documentation pages within the same work session",
@@ -128,7 +126,6 @@ Minimal example:
           "action": "Research Together AI, Fireworks, Groq, Replicate, and OpenRouter across pricing, latency, model availability, rate limits, batching support, reliability, and OpenAI-compatible API ergonomics. Then map each provider against the user's stated constraints."
         },
         {
-          "title": "Turn provider comparison into an implementation decision",
           "timestamp": "2025-02-14T16:05:00",
           "trigger_evidence": [
             "User has a draft comparison table but no final choice",
@@ -145,7 +142,6 @@ Minimal example:
       "goal": "Finish a UIST paper review",
       "opportunities": [
         {
-          "title": "Find related work while reading the paper",
           "timestamp": "2025-02-15T10:15:00",
           "trigger_evidence": [
             "User opened a UIST paper PDF and highlighted the related-work section",
@@ -157,7 +153,6 @@ Minimal example:
           "action": "Search for related papers, group them by research angle, identify the closest baselines, and summarize what the reviewed paper adds or misses relative to them."
         },
         {
-          "title": "Draft the full review from rough notes",
           "timestamp": "2025-02-15T11:40:00",
           "trigger_evidence": [
             "User has written bullets under 'strengths', 'weaknesses', and 'questions'",
@@ -169,7 +164,6 @@ Minimal example:
           "action": "Synthesize the notes into a review with summary, strengths, weaknesses, detailed comments, questions for authors, and an overall recommendation rationale."
         },
         {
-          "title": "Check review fairness and tone before submission",
           "timestamp": "2025-02-15T12:25:00",
           "trigger_evidence": [
             "User has a mostly complete review draft",

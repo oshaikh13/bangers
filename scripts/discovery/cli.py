@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .paths import (
+    DEFAULT_BANGERS_TEMPLATE,
     DEFAULT_COMBINE_TEMPLATE,
     DEFAULT_DISCOVERY_TEMPLATE,
     DEFAULT_INTERVAL_MINUTES,
@@ -18,8 +19,7 @@ from .runner import run
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run discovery interval prompts, combine candidate outputs, "
-            "or generate discovery questions with Codex or Claude."
+            "Run the discovery pipeline: goals, combine, bangers, questions."
         )
     )
     mode_group = parser.add_mutually_exclusive_group()
@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--combine",
         action="store_true",
         help=(
-            "Run prompts/combine.md once over --candidates-dir and write "
+            "Run prompts/02_discovery_combine.md once over --candidates-dir and write "
             "combined.json instead of running interval discovery."
         ),
     )
@@ -35,8 +35,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--questions",
         action="store_true",
         help=(
-            "Run prompts/discovery_questions.md once per selected element in "
-            "combined.json and write question/answer JSON files."
+            "Run prompts/04_discovery_questions.md once per selected banger "
+            "opportunity and write question/answer JSON files."
+        ),
+    )
+    mode_group.add_argument(
+        "--bangers",
+        action="store_true",
+        help=(
+            "Run prompts/03_discovery_bangers.md once per selected element in "
+            "combined.json and write suggestion JSON files."
         ),
     )
     parser.add_argument(
@@ -61,9 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--template",
         help=(
-            "Prompt template. Defaults to prompts/discovery_goals.md for "
-            "discovery, prompts/combine.md with --combine, or "
-            "prompts/discovery_questions.md with --questions."
+            "Prompt template. Defaults to the numbered prompt for the selected "
+            "stage."
         ),
     )
     parser.add_argument(
@@ -87,14 +94,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--bangers-dir",
+        help=(
+            "Directory for --bangers outputs. Defaults to "
+            "<candidates-dir>/discovery_bangers."
+        ),
+    )
+    parser.add_argument(
         "--interval-indexes",
         help="Comma-separated interval indexes or ranges to run, e.g. `0,3,10-12`.",
     )
     parser.add_argument(
         "--combined-indexes",
         help=(
-            "With --questions, comma-separated zero-based combined.json indexes "
-            "or ranges to run, e.g. `0,3,10-12`."
+            "With --bangers or --questions, comma-separated zero-based "
+            "combined.json indexes or ranges to run, e.g. `0,3,10-12`."
         ),
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
@@ -104,8 +118,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Run even if the expected output already exists "
-            "(candidate_<interval_index>.json, combined.json, or "
-            "discovery_questions/question_<combined_index>.json)."
+            "(candidate_<interval_index>.json, combined.json, banger files, "
+            "or question files)."
         ),
     )
     parser.add_argument(
@@ -297,17 +311,19 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--jobs must be greater than 0")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
-    if args.questions and args.interval_indexes:
+    if (args.questions or args.bangers) and args.interval_indexes:
         raise SystemExit(
-            "--interval-indexes selects discovery intervals; use "
-            "--combined-indexes with --questions"
+            "--interval-indexes selects discovery intervals; use --combined-indexes "
+            "with --bangers or --questions"
         )
-    if args.combined_indexes and not args.questions:
-        raise SystemExit("--combined-indexes requires --questions")
+    if args.combined_indexes and not (args.questions or args.bangers):
+        raise SystemExit("--combined-indexes requires --bangers or --questions")
 
     args.repo_root = Path(args.repo_root).resolve()
     if args.questions:
         default_template = DEFAULT_QUESTIONS_TEMPLATE
+    elif args.bangers:
+        default_template = DEFAULT_BANGERS_TEMPLATE
     elif args.combine:
         default_template = DEFAULT_COMBINE_TEMPLATE
     else:
@@ -330,6 +346,11 @@ def normalize_args(args: argparse.Namespace) -> None:
     else:
         args.questions_dir = args.candidates_dir / "discovery_questions"
 
+    if args.bangers_dir:
+        args.bangers_dir = Path(args.bangers_dir)
+    else:
+        args.bangers_dir = args.candidates_dir / "discovery_bangers"
+
     if args.run_log:
         args.run_log = Path(args.run_log)
     else:
@@ -346,6 +367,7 @@ def normalize_args(args: argparse.Namespace) -> None:
     args.intervals = args.intervals.resolve()
     args.candidates_dir = args.candidates_dir.resolve()
     args.questions_dir = args.questions_dir.resolve()
+    args.bangers_dir = args.bangers_dir.resolve()
     args.run_log = args.run_log.resolve()
 
 
