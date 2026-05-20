@@ -10,7 +10,7 @@ from .paths import (
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_QUESTIONS_TEMPLATE,
     REPO_ROOT,
-    default_candidates_dir,
+    default_discovery_dir,
     default_intervals_path,
 )
 from .runner import run
@@ -27,8 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--combine",
         action="store_true",
         help=(
-            "Run prompts/02_discovery_combine.md once over --candidates-dir and write "
-            "combined.json instead of running interval discovery."
+            "Run prompts/02_discovery_combine.md over 01_goals and write "
+            "02_combined/combined.json."
         ),
     )
     mode_group.add_argument(
@@ -79,26 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Working repository passed to the agent CLI.",
     )
     parser.add_argument(
-        "--candidates-dir",
-        help="Directory where candidate_<interval_index>.json files are expected.",
+        "--discovery-dir",
+        help="Discovery run directory. Defaults to discovery_<provider>_<minutes>m.",
     )
     parser.add_argument(
         "--run-log",
-        help="JSONL run ledger written by this runner. Defaults inside --candidates-dir.",
-    )
-    parser.add_argument(
-        "--questions-dir",
-        help=(
-            "Directory for --questions outputs. Defaults to "
-            "<candidates-dir>/discovery_questions."
-        ),
-    )
-    parser.add_argument(
-        "--bangers-dir",
-        help=(
-            "Directory for --bangers outputs. Defaults to "
-            "<candidates-dir>/discovery_bangers."
-        ),
+        help="JSONL run ledger written by this runner. Defaults inside --discovery-dir.",
     )
     parser.add_argument(
         "--interval-indexes",
@@ -118,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Run even if the expected output already exists "
-            "(candidate_<interval_index>.json, combined.json, banger files, "
+            "(goal_<interval_index>.json, combined.json, banger files, "
             "or question files)."
         ),
     )
@@ -238,7 +224,7 @@ def add_claude_args(parser: argparse.ArgumentParser) -> None:
         "--claude-permission-mode",
         default="acceptEdits",
         choices=("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"),
-        help="Permission mode for Claude. acceptEdits lets Claude write candidate files.",
+        help="Permission mode for Claude. acceptEdits lets Claude write output files.",
     )
     group.add_argument(
         "--claude-output-format",
@@ -333,28 +319,23 @@ def normalize_args(args: argparse.Namespace) -> None:
     if args.intervals is None:
         args.intervals = default_intervals_path(interval_minutes)
 
-    if args.candidates_dir:
-        args.candidates_dir = Path(args.candidates_dir)
+    if args.discovery_dir:
+        args.discovery_dir = Path(args.discovery_dir)
     else:
-        args.candidates_dir = default_candidates_dir(
+        args.discovery_dir = default_discovery_dir(
             args.provider,
             interval_minutes,
         )
 
-    if args.questions_dir:
-        args.questions_dir = Path(args.questions_dir)
-    else:
-        args.questions_dir = args.candidates_dir / "discovery_questions"
-
-    if args.bangers_dir:
-        args.bangers_dir = Path(args.bangers_dir)
-    else:
-        args.bangers_dir = args.candidates_dir / "discovery_bangers"
+    args.goals_dir = args.discovery_dir / "01_goals"
+    args.combined_dir = args.discovery_dir / "02_combined"
+    args.bangers_dir = args.discovery_dir / "03_bangers"
+    args.questions_dir = args.discovery_dir / "04_questions"
 
     if args.run_log:
         args.run_log = Path(args.run_log)
     else:
-        args.run_log = args.candidates_dir / f"{args.provider}_exec_runs.jsonl"
+        args.run_log = args.discovery_dir / f"{args.provider}_exec_runs.jsonl"
 
     if args.claude_stream:
         args.claude_output_format = "stream-json"
@@ -365,7 +346,9 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--claude-include-partial-messages requires --claude-output-format stream-json")
 
     args.intervals = args.intervals.resolve()
-    args.candidates_dir = args.candidates_dir.resolve()
+    args.discovery_dir = args.discovery_dir.resolve()
+    args.goals_dir = args.goals_dir.resolve()
+    args.combined_dir = args.combined_dir.resolve()
     args.questions_dir = args.questions_dir.resolve()
     args.bangers_dir = args.bangers_dir.resolve()
     args.run_log = args.run_log.resolve()

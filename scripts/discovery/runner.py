@@ -35,10 +35,10 @@ SCREENSHOTS_DIR = "screenshots"
 class IntervalResult:
     interval_index: int
     record: dict[str, Any]
-    candidate_path: Path
+    goal_path: Path
     stderr_path: Path
     returncode: int
-    created_candidate: bool
+    created_goal: bool
 
 
 @dataclass(frozen=True)
@@ -176,7 +176,7 @@ def cleanup_isolated_workdir(args: argparse.Namespace, workdir: Path) -> None:
     shutil.rmtree(workdir)
 
 
-def copy_candidate_atomically(src: Path, dst: Path) -> None:
+def copy_goal_atomically(src: Path, dst: Path) -> None:
     tmp = dst.with_name(f".{dst.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
     try:
         shutil.copy2(src, tmp)
@@ -192,25 +192,25 @@ def run_one_interval(
     row: dict[str, Any],
 ) -> IntervalResult:
     interval_index = int(row["interval_index"])
-    candidate_path = args.candidates_dir / f"candidate_{interval_index}.json"
-    stdout_path = args.candidates_dir / f"candidate_{interval_index}.stdout.log"
-    stderr_path = args.candidates_dir / f"candidate_{interval_index}.stderr.log"
+    goal_path = args.goals_dir / f"goal_{interval_index}.json"
+    stdout_path = args.goals_dir / f"goal_{interval_index}.stdout.log"
+    stderr_path = args.goals_dir / f"goal_{interval_index}.stderr.log"
 
     isolated_workdir: Path | None = None
     if args.no_isolate_agent_workdir:
         agent_workdir = args.repo_root
-        agent_candidate_path = candidate_path
+        agent_goal_path = goal_path
     else:
         agent_workdir = create_isolated_workdir(args, interval_index)
         isolated_workdir = agent_workdir
-        agent_candidate_path = (
-            agent_workdir / "agent-output" / f"candidate_{interval_index}.json"
+        agent_goal_path = (
+            agent_workdir / "agent-output" / f"goal_{interval_index}.json"
         )
 
     provider = build_provider_command(args, agent_workdir)
-    prompt = render_discovery_prompt(template, row, agent_candidate_path, provider.name)
+    prompt = render_discovery_prompt(template, row, agent_goal_path, provider.name)
     started_at = datetime.now(timezone.utc).isoformat()
-    print(f"run interval {interval_index} -> {candidate_path}", file=sys.stderr)
+    print(f"run interval {interval_index} -> {goal_path}", file=sys.stderr)
     print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
 
     try:
@@ -222,8 +222,8 @@ def run_one_interval(
             stderr_path,
             f"{provider.name}:{interval_index}",
         )
-        if agent_candidate_path.exists() and agent_candidate_path != candidate_path:
-            copy_candidate_atomically(agent_candidate_path, candidate_path)
+        if agent_goal_path.exists() and agent_goal_path != goal_path:
+            copy_goal_atomically(agent_goal_path, goal_path)
     finally:
         if isolated_workdir is not None:
             cleanup_isolated_workdir(args, isolated_workdir)
@@ -231,9 +231,11 @@ def run_one_interval(
     completed_at = datetime.now(timezone.utc).isoformat()
     record = {
         "provider": provider.name,
+        "discovery_dir": str(args.discovery_dir),
+        "goals_dir": str(args.goals_dir),
         "interval_index": interval_index,
-        "candidate_path": str(candidate_path),
-        "agent_candidate_path": str(agent_candidate_path),
+        "goal_path": str(goal_path),
+        "agent_goal_path": str(agent_goal_path),
         "agent_isolated": not args.no_isolate_agent_workdir,
         "agent_visible_roots": ["logs-indexed"]
         if not args.no_isolate_agent_workdir
@@ -250,10 +252,10 @@ def run_one_interval(
     return IntervalResult(
         interval_index=interval_index,
         record=record,
-        candidate_path=candidate_path,
+        goal_path=goal_path,
         stderr_path=stderr_path,
         returncode=returncode,
-        created_candidate=candidate_path.exists(),
+        created_goal=goal_path.exists(),
     )
 
 
@@ -272,24 +274,24 @@ def validate_unique_interval_indexes(rows: list[dict[str, Any]]) -> None:
 
 def print_dry_run(args: argparse.Namespace, template: str, row: dict[str, Any]) -> None:
     interval_index = int(row["interval_index"])
-    candidate_path = args.candidates_dir / f"candidate_{interval_index}.json"
+    goal_path = args.goals_dir / f"goal_{interval_index}.json"
     isolated_workdir: Path | None = None
     if args.no_isolate_agent_workdir:
         agent_workdir = args.repo_root
-        agent_candidate_path = candidate_path
+        agent_goal_path = goal_path
     else:
         agent_workdir = create_isolated_workdir(args, interval_index)
         isolated_workdir = agent_workdir
-        agent_candidate_path = (
-            agent_workdir / "agent-output" / f"candidate_{interval_index}.json"
+        agent_goal_path = (
+            agent_workdir / "agent-output" / f"goal_{interval_index}.json"
         )
 
     provider = build_provider_command(args, agent_workdir)
-    prompt = render_discovery_prompt(template, row, agent_candidate_path, provider.name)
+    prompt = render_discovery_prompt(template, row, agent_goal_path, provider.name)
     print(f"\n--- interval {interval_index} ---")
-    print(f"candidate path: {candidate_path}")
+    print(f"goal path: {goal_path}")
     print(f"agent workdir: {agent_workdir}")
-    print(f"agent candidate path: {agent_candidate_path}")
+    print(f"agent goal path: {agent_goal_path}")
     print(f"{provider.name} command:", " ".join(provider.command))
     if args.print_prompt:
         print(prompt)
@@ -299,8 +301,8 @@ def print_dry_run(args: argparse.Namespace, template: str, row: dict[str, Any]) 
         cleanup_isolated_workdir(args, isolated_workdir)
 
 
-def candidate_files(candidates_dir: Path) -> list[Path]:
-    return sorted(candidates_dir.glob("candidate_*.json"))
+def goal_files(goals_dir: Path) -> list[Path]:
+    return sorted(goals_dir.glob("goal_*.json"))
 
 
 def validate_combined_json(path: Path) -> None:
@@ -369,10 +371,16 @@ def validate_questions_json(path: Path) -> None:
 
 def print_combine_dry_run(args: argparse.Namespace, template: str) -> None:
     provider = build_provider_command(args, args.repo_root)
-    prompt = render_combine_prompt(template, args.candidates_dir, provider.name)
-    print("\n--- combine candidates ---")
-    print(f"candidates dir: {args.candidates_dir}")
-    print(f"combined path: {args.candidates_dir / 'combined.json'}")
+    combined_path = args.combined_dir / "combined.json"
+    prompt = render_combine_prompt(
+        template,
+        args.goals_dir,
+        combined_path,
+        provider.name,
+    )
+    print("\n--- combine goals ---")
+    print(f"goals dir: {args.goals_dir}")
+    print(f"combined path: {combined_path}")
     print(f"agent workdir: {args.repo_root}")
     print(f"{provider.name} command:", " ".join(provider.command))
     if args.print_prompt:
@@ -383,14 +391,19 @@ def print_combine_dry_run(args: argparse.Namespace, template: str) -> None:
 
 def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
     provider = build_provider_command(args, args.repo_root)
-    combined_path = args.candidates_dir / "combined.json"
-    stdout_path = args.candidates_dir / f"combined.{provider.name}.stdout.log"
-    stderr_path = args.candidates_dir / f"combined.{provider.name}.stderr.log"
-    prompt = render_combine_prompt(template, args.candidates_dir, provider.name)
+    combined_path = args.combined_dir / "combined.json"
+    stdout_path = args.combined_dir / f"combined.{provider.name}.stdout.log"
+    stderr_path = args.combined_dir / f"combined.{provider.name}.stderr.log"
+    prompt = render_combine_prompt(
+        template,
+        args.goals_dir,
+        combined_path,
+        provider.name,
+    )
     started_at = datetime.now(timezone.utc).isoformat()
-    files = candidate_files(args.candidates_dir)
+    files = goal_files(args.goals_dir)
 
-    print(f"combine {len(files)} candidates -> {combined_path}", file=sys.stderr)
+    print(f"combine {len(files)} goal files -> {combined_path}", file=sys.stderr)
     print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
     returncode = run_command(
         provider.command,
@@ -408,9 +421,10 @@ def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
     record = {
         "provider": provider.name,
         "mode": "combine",
-        "candidates_dir": str(args.candidates_dir),
+        "discovery_dir": str(args.discovery_dir),
+        "goals_dir": str(args.goals_dir),
         "combined_path": str(combined_path),
-        "candidate_count": len(files),
+        "goal_count": len(files),
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
         "returncode": returncode,
@@ -432,24 +446,25 @@ def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
 def run_combine(args: argparse.Namespace) -> int:
     if not args.repo_root.exists():
         raise SystemExit(f"repo root not found: {args.repo_root}")
-    if not args.candidates_dir.exists():
-        raise SystemExit(f"candidates directory not found: {args.candidates_dir}")
-    files = candidate_files(args.candidates_dir)
+    if not args.goals_dir.exists():
+        raise SystemExit(f"goals directory not found: {args.goals_dir}")
+    files = goal_files(args.goals_dir)
     if not files:
-        raise SystemExit(f"no candidate_*.json files found in {args.candidates_dir}")
+        raise SystemExit(f"no goal_*.json files found in {args.goals_dir}")
 
-    template = load_template(args.template, ("{dir_name}",))
-    combined_path = args.candidates_dir / "combined.json"
+    template = load_template(args.template, ("{dir_name}", "{combined_path}"))
+    combined_path = args.combined_dir / "combined.json"
     if combined_path.exists() and not args.force:
         print(f"skip combine: {combined_path} exists", file=sys.stderr)
         return 0
 
-    print(f"selected candidate files: {len(files)}", file=sys.stderr)
+    print(f"selected goal files: {len(files)}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
     if args.dry_run:
         print_combine_dry_run(args, template)
         return 0
 
+    args.combined_dir.mkdir(parents=True, exist_ok=True)
     result = run_combine_once(args, template)
     append_jsonl(args.run_log, result.record)
     if result.returncode != 0:
@@ -510,7 +525,7 @@ def print_bangers_dry_run(
         provider.name,
     )
     print(f"\n--- combined element {combined_index} ---")
-    print(f"combined path: {args.candidates_dir / 'combined.json'}")
+    print(f"combined path: {args.combined_dir / 'combined.json'}")
     print(f"bangers path: {output_path}")
     print(f"agent workdir: {args.repo_root}")
     print(f"{provider.name} command:", " ".join(provider.command))
@@ -556,8 +571,9 @@ def run_bangers_once(
     record = {
         "provider": provider.name,
         "mode": "bangers",
-        "candidates_dir": str(args.candidates_dir),
-        "combined_path": str(args.candidates_dir / "combined.json"),
+        "discovery_dir": str(args.discovery_dir),
+        "goals_dir": str(args.goals_dir),
+        "combined_path": str(args.combined_dir / "combined.json"),
         "combined_index": combined_index,
         "bangers_path": str(output_path),
         "stdout_path": str(stdout_path),
@@ -582,10 +598,8 @@ def run_bangers_once(
 def run_bangers(args: argparse.Namespace) -> int:
     if not args.repo_root.exists():
         raise SystemExit(f"repo root not found: {args.repo_root}")
-    if not args.candidates_dir.exists():
-        raise SystemExit(f"candidates directory not found: {args.candidates_dir}")
 
-    combined_path = args.candidates_dir / "combined.json"
+    combined_path = args.combined_dir / "combined.json"
     if not combined_path.exists():
         raise SystemExit(f"combined.json not found: {combined_path}")
 
@@ -802,7 +816,9 @@ def run_questions_once(
     record = {
         "provider": provider.name,
         "mode": "questions",
-        "candidates_dir": str(args.candidates_dir),
+        "discovery_dir": str(args.discovery_dir),
+        "goals_dir": str(args.goals_dir),
+        "combined_dir": str(args.combined_dir),
         "bangers_dir": str(args.bangers_dir),
         "suggestion_index": suggestion_index,
         "combined_index": suggestion["_combined_index"],
@@ -959,7 +975,7 @@ def run_discovery(args: argparse.Namespace) -> int:
         return 0
     validate_unique_interval_indexes(rows)
 
-    args.candidates_dir.mkdir(parents=True, exist_ok=True)
+    args.goals_dir.mkdir(parents=True, exist_ok=True)
     print(f"selected rows: {len(rows)}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
     print(f"jobs: {args.jobs}", file=sys.stderr)
@@ -973,9 +989,9 @@ def run_discovery(args: argparse.Namespace) -> int:
     rows_to_run: list[dict[str, Any]] = []
     for row in rows:
         interval_index = int(row["interval_index"])
-        candidate_path = args.candidates_dir / f"candidate_{interval_index}.json"
-        if candidate_path.exists() and not args.force:
-            print(f"skip interval {interval_index}: {candidate_path} exists", file=sys.stderr)
+        goal_path = args.goals_dir / f"goal_{interval_index}.json"
+        if goal_path.exists() and not args.force:
+            print(f"skip interval {interval_index}: {goal_path} exists", file=sys.stderr)
             continue
         if args.dry_run:
             print_dry_run(args, template, row)
@@ -1017,11 +1033,11 @@ def run_discovery(args: argparse.Namespace) -> int:
                         pending.cancel()
                     return result.returncode
 
-            if not result.created_candidate:
+            if not result.created_goal:
                 failures += 1
                 print(
                     f"interval {result.interval_index} completed but did not create "
-                    f"{result.candidate_path}",
+                    f"{result.goal_path}",
                     file=sys.stderr,
                 )
                 if not args.continue_on_error:

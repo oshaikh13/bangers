@@ -15,8 +15,8 @@ def default_intervals_path(interval_minutes: int) -> Path:
     return REPO_ROOT / "data" / f"log_intervals_{interval_minutes}m.jsonl"
 
 
-def default_candidates_dir(
+def default_discovery_dir(
     provider: str,
     interval_minutes: int,
 ) -> Path:
-    return REPO_ROOT / f"candidates_{provider}_{interval_minutes}m"
+    return REPO_ROOT / f"discovery_{provider}_{interval_minutes}m"

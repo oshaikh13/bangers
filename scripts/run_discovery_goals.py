@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run discovery pipeline stages with Codex or Claude."""
+"""Generate per-interval discovery goals with Codex or Claude."""
 
 from __future__ import annotations
 

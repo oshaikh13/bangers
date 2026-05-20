@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Combine discovery candidate JSON files with Codex or Claude."""
+"""Combine discovery goal JSON files with Codex or Claude."""
 
 from __future__ import annotations
 

@@ -32,7 +32,7 @@ Do not generate generic questions. Each question should be specific to the given
 
 Prefer questions whose answers are directly useful for execution.
 
-For each Q/A pair, include `question_difficulty`, an integer from 1 to 10 that estimates how hard it is to answer the question from the user’s logs or to reasonably infer/predict the answer.
+For each Q/A pair, include `question_difficulty`, an integer from 1 to 10 that estimates how hard it is to answer the question from the user’s logs **at the SPECIFIC timestamp**; or to reasonably infer/predict the answer.
 
 Use this scale:
 
@@ -84,7 +84,7 @@ Input suggestion:
 Output:
 
 {
-  "suggestion_title": "Compare inference providers after repeated pricing and docs searches",
+  "suggestion": "I can compare inference providers after repeated pricing and docs searches",
   "qa_pairs": [
     {
       "question": "What decision is the user trying to make?",

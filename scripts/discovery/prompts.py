@@ -19,7 +19,7 @@ def load_template(path: Path, required_placeholders: Iterable[str]) -> str:
 def render_discovery_prompt(
     template: str,
     row: dict[str, Any],
-    candidate_path: Path,
+    goal_path: Path,
     provider: str,
 ) -> str:
     interval_index = row.get("interval_index")
@@ -35,18 +35,21 @@ def render_discovery_prompt(
         rendered
         + "\n\n"
         + f"For this {provider} run, write the JSON file to this exact path: "
-        + str(candidate_path)
+        + str(goal_path)
         + "\n"
     )
 
 
 def render_combine_prompt(
     template: str,
-    candidates_dir: Path,
+    goals_dir: Path,
+    combined_path: Path,
     provider: str,
 ) -> str:
-    combined_path = candidates_dir / "combined.json"
-    rendered = template.replace("{dir_name}", str(candidates_dir))
+    rendered = (
+        template.replace("{dir_name}", str(goals_dir))
+        .replace("{combined_path}", str(combined_path))
+    )
     return (
         rendered
         + "\n\n"

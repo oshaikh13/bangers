@@ -1,14 +1,14 @@
 # Task
 
-We have a candidates folder:
+We have a goals folder:
 
 {dir_name}
 
-Analyze all candidate goal files in this folder and combine repeated or near-duplicate goals into a single consolidated file. Use subagents if you need to.
+Analyze all goal files in this folder and combine repeated or near-duplicate goals into a single consolidated file. Use subagents if you need to.
 
 Many goals are repeats. Your job is to identify all unique goals and write them to:
 
-{dir_name}/combined.json
+{combined_path}
 
 ## Deduplication rules
 
@@ -38,7 +38,7 @@ For each unique goal:
 
 Write a JSON array to:
 
-{dir_name}/combined.json
+{combined_path}
 
 Use this exact schema:
 
@@ -56,7 +56,7 @@ Use this exact schema:
 
 ## Requirements
 
-- Output only valid JSON in `combined.json`.
+- Output only valid JSON.
 - Do not include markdown in the file.
 - Do not include commentary outside the JSON file.
 - Preserve distinct goals when they target different people, places, projects, companies, documents, meetings, artifacts, or decisions.
