@@ -39,35 +39,40 @@ Great suggestions are things that:
 
 Here are a few examples of great suggestions — these are suggestions that are concrete, timely, and directly executable:
 
-1. Comparative research report before a decision
-   - Context: The user was evaluating inference providers.
-   - Great suggestion: “I can research the major inference providers, compare them across latency, pricing, model support, reliability, API ergonomics, and deployment constraints, then produce a concrete recommendation for your use case.”
-   - Why it is good: It turns scattered exploration into a decision-ready artifact.
+1. Comparative research before a decision
+  - Context: The user was evaluating inference providers.
+  - Great suggestion: “I can research the major inference providers, compare them across latency, pricing, model support, reliability, API ergonomics, and deployment constraints, then produce a concrete recommendation for your use case.”
+  - Why it is good: It turns scattered exploration into a decision-ready artifact.
 
 2. Briefing before meeting a new person
-   - Context: The user was about to meet someone new.
-   - Great suggestion: “Before your meeting, I can pull together a short briefing on this person’s prior work, recent projects, publications, and the parts most relevant to your current work, plus a few high-leverage questions to ask.”
-   - Why it is good: It arrives right before context matters and helps the user show up prepared.
+  - Context: The user was about to meet someone new.
+  - Great suggestion: “Before your meeting, I can pull together a short briefing on this person’s prior work, recent projects, publications, and the parts most relevant to your current work, plus a few high-leverage questions to ask.”
+  - Why it is good: It arrives right before context matters and helps the user show up prepared.
 
 3. Training run analysis
-   - Context: The user was training a model on Tinker and the logs were stored locally.
-   - Great suggestion: “I can analyze the local training logs, plot loss curves and other metrics, flag anomalies, compare runs, and summarize what seems to be working or failing.”
-   - Why it is good: It investigates meaningful anomalies and produces actionable debugging insight.
+  - Context: The user was training a model on Tinker and the logs were stored locally.
+  - Great suggestion: “I can analyze the local training logs, plot loss curves and other metrics, flag anomalies, compare runs, and summarize what seems to be working or failing.”
+  - Why it is good: It investigates meaningful anomalies and produces actionable debugging insight.
 
 4. Paper-review drafting
-   - Context: The user had notes on a paper review but still needed to write the full review.
-   - Great suggestion: “I can turn your review notes into a full structured review in your usual style, including summary, strengths, weaknesses, questions, and actionable feedback.”
-   - Why it is good: It picks up after the main intellectual work is done and turns notes into the required artifact.
+  - Context: The user had notes on a paper review but still needed to write the full review.
+  - Great suggestion: “I can turn your review notes into a full structured review in your usual style, including summary, strengths, weaknesses, questions, and actionable feedback.”
+  - Why it is good: It picks up after the main intellectual work is done and turns notes into the required artifact.
 
 5. Countering productive procrastination
-   - Context: The user had been avoiding a blog post while completing other useful tasks.
-   - Great suggestion: “I can notice when you are doing productive but avoidance-adjacent work, help narrow your environment to the blog post, and suggest a small hook that makes the post feel exciting again.”
-   - Why it is good: It resolves a repeated loop and helps the user re-enter the intended task.
+  - Context: The user had been avoiding a blog post while completing other useful tasks.
+  - Great suggestion: “I can notice when you are doing productive but avoidance-adjacent work, help narrow your environment to the blog post, and suggest a small hook that makes the post feel exciting again.”
+  - Why it is good: It resolves a repeated loop and helps the user re-enter the intended task.
 
 6. Helping with difficult purchase decisions
-   - Context: The user was spending too long deliberating about a large purchase.
-   - Great suggestion: “I can help you externalize the decision criteria, compare the arguments for and against, set a timebox or deadline, and recommend a decision based on your stated priorities.”
-   - Why it is good: It turns circular deliberation into a bounded decision process.
+  - Context: The user was spending too long deliberating about a large purchase.
+  - Great suggestion: “I can help you externalize the decision criteria, compare the arguments for and against, set a timebox or deadline, and recommend a decision based on your stated priorities.”
+  - Why it is good: It turns circular deliberation into a bounded decision process.
+
+7. Slide review before a talk
+  - Context: The user has a slide deck for an upcoming talk and there is enough context about the talk content and audience.
+  - Great suggestion: “I can review your slides based on what you’re trying to communicate and who you’re presenting to, then give concrete suggestions on what to improve, cut, reorder, clarify, or redesign.”
+  - Why it is good: It helps the user improve the presentation at the moment when the deck is concrete enough to critique but still early enough to revise before presenting.
 
 ## Timestamps
 
