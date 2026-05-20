@@ -1,4 +1,4 @@
-candidates_*
+discovery_*
 staging/
 __pycache__/
 *.pyc
