@@ -26,10 +26,24 @@ Good Q/A pairs should:
 - Surface risks, missing context, or assumptions
 - Break the suggestion into executable steps
 - Include timing context when relevant
+- Include some questions where the answer is explicitly unknown, using `"I don't know"` or a similarly clear statement when the logs do not contain enough evidence
 
 Do not generate generic questions. Each question should be specific to the given suggestion.
 
 Prefer questions whose answers are directly useful for execution.
+
+For each Q/A pair, include `question_difficulty`, an integer from 1 to 10 that estimates how hard it is to answer the question from the user’s logs or to reasonably infer/predict the answer.
+
+Use this scale:
+
+- 1 = explicitly stated in the suggestion or logs
+- 2–3 = strongly implied by multiple pieces of evidence
+- 4–5 = partially supported but requires some inference
+- 6–7 = weakly supported, ambiguous, or requires synthesizing scattered context
+- 8–9 = mostly unknown and difficult to infer reliably
+- 10 = impossible to answer from the available logs; answer should usually be “I don’t know”
+
+When the answer is unknown, do not invent details. State what is missing and, if useful, what the executing assistant should ask or assume.
 
 ## Output format
 
@@ -43,7 +57,8 @@ Use this shape:
     {
       "question": string,
       "answer": string,
-      "why_it_matters": string
+      "why_it_matters": string,
+      "question_difficulty": number
     }
   ]
 }
@@ -74,22 +89,38 @@ Output:
     {
       "question": "What decision is the user trying to make?",
       "answer": "They are choosing an inference provider for an eval pipeline that needs to support Llama models, low-latency batch jobs, and an OpenAI-compatible API.",
-      "why_it_matters": "The assistant should optimize the comparison around a concrete provider decision, not produce a generic market overview."
+      "why_it_matters": "The assistant should optimize the comparison around a concrete provider decision, not produce a generic market overview.",
+      "question_difficulty": 2
     },
     {
       "question": "Which providers should be compared?",
       "answer": "Together AI, Fireworks, Groq, Replicate, and OpenRouter, because the user opened their docs and pricing pages in the same work session.",
-      "why_it_matters": "This defines the comparison set and prevents the assistant from wasting effort on irrelevant providers."
+      "why_it_matters": "This defines the comparison set and prevents the assistant from wasting effort on irrelevant providers.",
+      "question_difficulty": 1
     },
     {
       "question": "What dimensions should the comparison cover?",
       "answer": "Pricing, latency, model availability, Llama support, rate limits, batching support, reliability, and OpenAI-compatible API ergonomics.",
-      "why_it_matters": "These dimensions map directly to the user’s apparent constraints and likely implementation concerns."
+      "why_it_matters": "These dimensions map directly to the user’s apparent constraints and likely implementation concerns.",
+      "question_difficulty": 2
     },
     {
       "question": "What should the final artifact contain?",
       "answer": "A concise comparative report with a table, a recommended default provider, a fallback provider, tradeoffs, and implementation notes for swapping into the existing OpenAI-style client.",
-      "why_it_matters": "This makes the output decision-ready rather than merely informative."
+      "why_it_matters": "This makes the output decision-ready rather than merely informative.",
+      "question_difficulty": 4
+    },
+    {
+      "question": "What is the user's exact monthly inference budget?",
+      "answer": "I don't know. The available evidence mentions pricing searches but does not provide a concrete budget.",
+      "why_it_matters": "Without a budget, the assistant should avoid over-optimizing for absolute cost and instead compare pricing sensitivity across plausible usage levels.",
+      "question_difficulty": 9
+    },
+    {
+      "question": "What latency threshold would make a provider unacceptable?",
+      "answer": "I don't know. The logs indicate the user cares about low latency, but they do not state a specific p50, p95, or p99 target.",
+      "why_it_matters": "A provider recommendation may change substantially depending on whether the user needs interactive latency, batch throughput, or strict tail-latency guarantees.",
+      "question_difficulty": 8
     }
   ]
 }
