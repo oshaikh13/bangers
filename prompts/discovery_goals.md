@@ -83,7 +83,7 @@ Score high usefulness when the goal would save substantial time, reduce meaningf
 
 Score high confidence when the goal is directly supported by repeated behavior, explicit searches, open artifacts, deadlines, meetings, messages, future follow-through, or strong cross-log evidence. Score lower confidence when the goal is a reasonable but speculative interpretation of ambiguous behavior.
 
-Do not use `confidence` to mean how much information is available to complete the task. It is about the evidence that the goal exists. Do not include low-confidence guesses just because they would be useful if true.
+Highly useful goals may be more speculative, resulting in lower confidence. Similarly, you may be very confident in a goal, but its usefulness is less of a priority in the user's eyes.
 
 ## Proactive goal patterns
 
