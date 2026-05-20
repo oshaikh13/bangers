@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate question/answer pairs for combined discovery suggestions."""
+"""Generate question/answer pairs for combined discovery outputs."""
 
 from __future__ import annotations
 
