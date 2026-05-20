@@ -393,7 +393,7 @@ Use this exact schema:
     "context": "describe the context that led up to this goal, so the user remembers what they were doing",
     "reasoning": "justify why this goal matters, what evidence supports it, and why this execution timestamp is the right time to surface it",
     "description": "1-2 sentences describing the user's goal, including the specific scope, dimensions, or decisions involved",
-    "goal": "one sentence stating the concrete outcome the user needs to reach",
+    "goal": "one sentence stating the concrete outcome the user wants to reach",
     "usefulness": "number from 1 to 10"on a scale from 1 "number from 1 to 10"o 10, how useful would achieving this goal be for the user?",
     "confidence": "on a scale from 1 to 10, how confident are you that the user actually has this goal in the first place?"
   }
