@@ -1,6 +1,6 @@
 # Task
 
-Your job is to come up with creative, helpful, and concrete suggestions for the user given a goal.
+Your job is to come up with creative, helpful, and concrete suggestions for a user given a set of goals.
 
 You may use subagents to help. You MUST search through additional logs (in the logs-indexed folder) for context in creating suggestions. Use the times to help identify relevant logs.
 
@@ -8,9 +8,27 @@ You may use subagents to help. You MUST search through additional logs (in the l
 
 {combined_json_element}
 
-## How to help
+Inputs usually come from `02c_suggestion_inputs/inputs.json` and have one compact shape:
 
-A single goal may contain multiple distinct opportunities for help.
+{
+  "type": "goal or bridge",
+  "name": "goal or bridge name",
+  "time": "timestamp when the goal or bridge becomes visible",
+  "usefulness": "number or null",
+  "confidence": "number or null",
+  "attention_gap": "number or null",
+  "context": "short evidence summary",
+  "reasoning": "why this goal or bridge matters",
+  "description": "plain-language description of what the user is trying to accomplish"
+}
+
+For `type: "goal"`, generate suggestions that help the user make progress on the named siloed goal.
+
+For `type: "bridge"`, generate suggestions that act on the broader cross-goal motivation or tension implied by the name. Do not collapse the suggestion back into only one narrow subgoal unless log evidence shows that subgoal is the real leverage point.
+
+Use `name` as the goal to investigate, `time` as the starting point for log search, and `context`, `reasoning`, and `description` to understand the underlying situation before choosing concrete suggestions.
+
+## How to help
 
 Do not assume there is only one “best” suggestion per goal. Instead, identify the different moments where the system could usefully intervene. Each opportunity should correspond to a specific point in time, a specific user context, and a specific kind of assistance.
 
@@ -27,7 +45,7 @@ Each of these should be treated as a separate opportunity with its own timestamp
 
 Great suggestions are things that:
 
-- Accelerate an active goal the user is already pursuing
+- Accelerate a goal the user might not have time to pursue.
 - Consolidate scattered context into a decision, message, plan, or artifact
 - Prepare for an upcoming moment where context will matter
 - Resolve repeated loops, hesitation, or unresolved cognitive load
@@ -42,7 +60,7 @@ Here are a few examples of great suggestions — these are suggestions that are 
 1. Comparative research before a decision
   - Context: The user was evaluating inference providers.
   - Great suggestion: “I can research the major inference providers, compare them across latency, pricing, model support, reliability, API ergonomics, and deployment constraints, then produce a concrete recommendation for your use case.”
-  - Why it is good: It turns scattered exploration into a decision-ready artifact.
+  - Why it is good: It turns scattered exploration into a decision-ready artifact; and it's something a user might not have time to do.
 
 2. Briefing before meeting a new person
   - Context: The user was about to meet someone new.
@@ -52,7 +70,7 @@ Here are a few examples of great suggestions — these are suggestions that are 
 3. Training run analysis
   - Context: The user was training a model on Tinker and the logs were stored locally.
   - Great suggestion: “I can analyze the local training logs, plot loss curves and other metrics, flag anomalies, compare runs, and summarize what seems to be working or failing.”
-  - Why it is good: It investigates meaningful anomalies and produces actionable debugging insight.
+  - Why it is good: It investigates meaningful anomalies and produces actionable debugging insight; and it's also something you think the user doesn't have figured out yet.
 
 4. Paper-review drafting
   - Context: The user had notes on a paper review but still needed to write the full review.
@@ -72,7 +90,7 @@ Here are a few examples of great suggestions — these are suggestions that are 
 7. Slide review before a talk
   - Context: The user has a slide deck for an upcoming talk and there is enough context about the talk content and audience.
   - Great suggestion: “I can review your slides based on what you’re trying to communicate and who you’re presenting to, then give concrete suggestions on what to improve, cut, reorder, clarify, or redesign.”
-  - Why it is good: It helps the user improve the presentation at the moment when the deck is concrete enough to critique but still early enough to revise before presenting.
+  - Why it is good: It helps the user improve the presentation at the moment when the deck is concrete enough to critique but still early enough to revise before presenting. The user also likely won't think of or have time to solicit critique right away.
 
 ## Timestamps
 
@@ -87,6 +105,14 @@ For each opportunity, include:
 - Why that is the right time and not too early or too late
 - The concrete action the system should offer to take
 - The expected output artifact, such as a report, draft, plan, plot, agenda, email, outline, critique, or recommendation
+
+## Scoring
+
+For each suggestion, include:
+
+- `usefulness`: 1 to 10. How much value this suggestion would provide the user if they looked at it, on a scale from 1 to 10.
+- `confidence`: 1 to 10. How likely is the that the user will actually click on this suggestion if it was surfaced. Just because it's useful does not mean the user may actually look at it.
+- `attention_gap`: 1 to 10. How likely is it that the user will NOT do this themselves now or in the immediate future because of time pressure, competing commitments, avoidance, context switching, etc.
 
 ## Output format
 

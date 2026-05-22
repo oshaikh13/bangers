@@ -29,10 +29,16 @@ For example:
 
 For each unique goal:
 1. Create a concise combined goal name.
-2. Include all source goals that map to it.
-3. Preserve the original goal name/title and timestamp for each source goal.
-4. If available, use the original `execution_timestamp`; otherwise use the best available time field.
-5. Rank combined goals roughly from most useful to least useful, using the source goals’ usefulness scores and the number/quality of supporting duplicates as evidence.
+2. Write a short `context`, `reasoning`, and `description` for the combined goal.
+3. Include all source goals that map to it.
+4. Preserve the original goal name/title, timestamp, and scores for each source goal.
+5. If available, use the original `execution_timestamp`; otherwise use the best available time field.
+6. Rank combined goals roughly from most useful to least useful, using the source goals’ usefulness scores and the number/quality of supporting duplicates as evidence.
+
+Definitions:
+- `context`: the concrete evidence or situation that makes this combined goal visible.
+- `reasoning`: why the source goals should be understood as one underlying goal.
+- `description`: what the user is trying to accomplish, phrased as a useful objective.
 
 ## Output format
 
@@ -45,10 +51,16 @@ Use this exact schema:
 [
   {
     "combined": "concise name for the unique combined goal",
+    "context": "short evidence summary for this combined goal",
+    "reasoning": "why these source goals combine into this underlying goal",
+    "description": "what the user is trying to accomplish",
     "goals": [
       {
         "name": "original goal name or title",
-        "time": "original execution timestamp or best available timestamp"
+        "time": "original execution timestamp or best available timestamp",
+        "usefulness": "original usefulness score if available",
+        "confidence": "original confidence score if available",
+        "attention_gap": "original attention_gap score if available"
       }
     ]
   }
@@ -63,3 +75,5 @@ Use this exact schema:
 - Merge goals that are only wording variations of the same underlying task.
 - Do not drop source goals; every input goal should appear under exactly one combined goal unless it is malformed or unusable.
 - If a goal is malformed, skip it only if there is no recoverable name/title or timestamp.
+- Preserve `usefulness`, `confidence`, and `attention_gap` from source goals when available. If a source goal lacks one of these scores, omit that score for that source goal rather than inventing it.
+- Include `context`, `reasoning`, and `description` for every combined goal.

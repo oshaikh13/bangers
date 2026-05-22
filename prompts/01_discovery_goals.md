@@ -71,9 +71,9 @@ Examples:
 - The user reads a vendor email thread, checks a pricing spreadsheet, and opens Slack. The goal is to communicate the pricing decision clearly to Priya, not merely draft a generic message.
 - The user discusses moving constraints with a roommate across messages and searches. The goal is to settle the move plan around budget, timing, packing, and open decisions, not merely create a checklist.
 
-## Scoring usefulness and confidence
+## Scoring usefulness, confidence, and attention gap
 
-Every candidate must include both `usefulness` and `confidence`.
+Every candidate must include `usefulness`, `confidence`, and `attention_gap`.
 
 `usefulness` answers: if the user achieved this goal well, how valuable would that be for them?
 
@@ -84,6 +84,16 @@ Score high usefulness when the goal would save substantial time, reduce meaningf
 Score high confidence when the goal is directly supported by repeated behavior, explicit searches, open artifacts, deadlines, meetings, messages, future follow-through, or strong cross-log evidence. Score lower confidence when the goal is a reasonable but speculative interpretation of ambiguous behavior.
 
 Highly useful goals may be more speculative, resulting in lower confidence. Similarly, you may be very confident in a goal, but its usefulness is less of a priority in the user's eyes.
+
+`attention_gap` answers: how likely is it that the user will NOT do this themselves now or in the immediate future because of time pressure, competing commitments, avoidance, context switching, etc.
+
+Score high attention gap when the goal appears important but is being displaced by time pressure, competing commitments, productive avoidance, scattered context, repeated deferral, or context switching. Score low attention gap when the user is already honed in on the exact work and likely to do it immediately without help. You can look at future logs to determine this!
+
+Examples:
+- High attention gap: the user repeatedly opens a paper-writing checklist but keeps switching to adjacent debugging or admin work.
+- High attention gap: the user expresses interest in writing a post but only reads related articles and never starts drafting.
+- Low attention gap: the user is already in the tax filing flow, entering fields steadily, and has the source documents open.
+- Low attention gap: the user is actively debugging the exact error and already making the patch.
 
 ## Proactive goal patterns
 
@@ -219,8 +229,8 @@ Example 2: Research analysis for LongNap
   "reasoning": "This is not just reading or note-taking; it implies an analysis goal. The relevant goal is to understand whether active questioning improves recall, task completion, or later usefulness.",
   "description": "Understand whether moments where the system asked clarifying or proactive questions led to better LongNap outcomes than moments where it did not.",
   "goal": "Identify which questioning behaviors lead to better LongNap outcomes and extract design implications for improving it.",
-  "usefulness": "number from 1 to 10"0,
-  "confidence":"number from 1 to 10"8
+  "usefulness": "number from 1 to 10",
+  "confidence":"number from 1 to 10"
 }
 
 Example 3: Human-like terminal-use tasks
@@ -231,8 +241,8 @@ Example 3: Human-like terminal-use tasks
   "reasoning": "The project calls for empirical analysis, not just brainstorming. Future behavior shows the user needed patterns from datasets, so the goal is to identify what makes terminal-use tasks feel artificial versus realistic.",
   "description": "Understand what patterns make terminal-use benchmark tasks feel artificial versus human-like.",
   "goal": "Use relevant datasets and examples to produce concrete task design recommendations.",
-  "usefulness": "number from 1 to 10"0,
-  "confidence":"number from 1 to 10"8
+  "usefulness": "number from 1 to 10",
+  "confidence":"number from 1 to 10"
 }
 
 Example 4: Event outreach procrastination
@@ -255,8 +265,8 @@ Example 5: Moving plan with roommate
   "reasoning": "The moving task is distributed across personal conversations, calendar dates, searches, and budget constraints. A generic reminder would miss the underlying goal: settling the move plan with the roommate before the deadline creates stress.",
   "description": "Settle the move plan with the roommate around the move-in date, budget, neighborhood constraints, packing timeline, and open decisions.",
   "goal": "Reduce anxiety and make the move feel concrete and manageable before the deadline.",
-  "usefulness": "number from 1 to 10"0,
-  "confidence":"number from 1 to 10"9
+  "usefulness": "number from 1 to 10",
+  "confidence":"number from 1 to 10"
 }
 
 Example 6: Answer found later
@@ -268,7 +278,7 @@ Example 6: Answer found later
   "description": "Resolve the specific Next.js caching issue caused by route segment config.",
   "goal": "Reach the fix earlier and avoid the documentation search loop.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"0
+  "confidence": "number from 1 to 10"
 }
 
 Example 7: Upcoming customer call
@@ -394,8 +404,9 @@ Use this exact schema:
     "reasoning": "justify why this goal matters, what evidence supports it, and why this execution timestamp is the right time to surface it",
     "description": "1-2 sentences describing the user's goal, including the specific scope, dimensions, or decisions involved",
     "goal": "one sentence stating the concrete outcome the user wants to reach",
-    "usefulness": "number from 1 to 10"on a scale from 1 "number from 1 to 10"o 10, how useful would achieving this goal be for the user?",
-    "confidence": "on a scale from 1 to 10, how confident are you that the user actually has this goal in the first place?"
+    "usefulness": "on a scale from 1 to 10, how useful would achieving this goal be for the user?",
+    "confidence": "on a scale from 1 to 10, how confident are you that the user actually has this goal in the first place?",
+    "attention_gap": "on a scale from 1 to 10, how much does the user seem to want or need this while not giving it focused attention in the near future?"
   }
 ]
 
@@ -404,5 +415,5 @@ Rules for the JSON:
 - Every candidate must describe one specific user goal.
 - Generate goals across the confidence range.
 - Every candidate must include an execution timestamp.
-- Every candidate must include integer `usefulness` and `confidence` scores from 1 to 10.
+- Every candidate must include integer `usefulness`, `confidence`, and `attention_gap` scores from 1 to 10.
 - Every title must be specific enough that it could not apply to a different situation.

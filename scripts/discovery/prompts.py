@@ -59,6 +59,25 @@ def render_combine_prompt(
     )
 
 
+def render_bridges_prompt(
+    template: str,
+    combined_path: Path,
+    bridges_path: Path,
+    provider: str,
+) -> str:
+    rendered = (
+        template.replace("{combined_path}", str(combined_path))
+        .replace("{bridges_path}", str(bridges_path))
+    )
+    return (
+        rendered
+        + "\n\n"
+        + f"For this {provider} run, write the JSON file to this exact path: "
+        + str(bridges_path)
+        + "\n"
+    )
+
+
 def render_bangers_prompt(
     template: str,
     combined_json_element: dict[str, Any],

@@ -22,6 +22,7 @@ from .process import run_command
 from .prompts import (
     load_template,
     render_bangers_prompt,
+    render_bridges_prompt,
     render_combine_prompt,
     render_discovery_prompt,
     render_questions_prompt,
@@ -48,6 +49,15 @@ class CombineResult:
     stderr_path: Path
     returncode: int
     created_combined: bool
+
+
+@dataclass(frozen=True)
+class BridgesResult:
+    record: dict[str, Any]
+    bridges_path: Path
+    stderr_path: Path
+    returncode: int
+    created_bridges: bool
 
 
 @dataclass(frozen=True)
@@ -332,6 +342,10 @@ def load_combined_json(path: Path) -> list[dict[str, Any]]:
     return elements
 
 
+def banger_inputs_path(args: argparse.Namespace) -> Path:
+    return args.suggestion_inputs_dir / "inputs.json"
+
+
 def select_combined_elements(
     elements: list[dict[str, Any]],
     combined_indexes: str | None,
@@ -483,6 +497,137 @@ def run_combine(args: argparse.Namespace) -> int:
     return 0
 
 
+def validate_bridges_json(path: Path) -> None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"bridges output is not valid JSON: {path}: {exc}") from exc
+    if not isinstance(data, list):
+        raise RuntimeError(f"bridges output must be a JSON array: {path}")
+    for index, bridge in enumerate(data):
+        if not isinstance(bridge, dict):
+            raise RuntimeError(f"bridges output element {index} must be an object: {path}")
+        connected = bridge.get("connected_goals")
+        if not isinstance(connected, list) or len(connected) < 2:
+            raise RuntimeError(
+                f"bridges output element {index} must include at least two "
+                f"connected_goals: {path}"
+            )
+
+
+def print_bridges_dry_run(args: argparse.Namespace, template: str) -> None:
+    provider = build_provider_command(args, args.repo_root)
+    combined_path = args.combined_dir / "combined.json"
+    bridges_path = args.bridges_dir / "bridges.json"
+    prompt = render_bridges_prompt(
+        template,
+        combined_path,
+        bridges_path,
+        provider.name,
+    )
+    print("\n--- bridge goals ---")
+    print(f"combined path: {combined_path}")
+    print(f"bridges path: {bridges_path}")
+    print(f"agent workdir: {args.repo_root}")
+    print(f"{provider.name} command:", " ".join(provider.command))
+    if args.print_prompt:
+        print(prompt)
+    else:
+        print(prompt[:1200] + ("..." if len(prompt) > 1200 else ""))
+
+
+def run_bridges_once(args: argparse.Namespace, template: str) -> BridgesResult:
+    provider = build_provider_command(args, args.repo_root)
+    combined_path = args.combined_dir / "combined.json"
+    bridges_path = args.bridges_dir / "bridges.json"
+    stdout_path = args.bridges_dir / f"bridges.{provider.name}.stdout.log"
+    stderr_path = args.bridges_dir / f"bridges.{provider.name}.stderr.log"
+    prompt = render_bridges_prompt(
+        template,
+        combined_path,
+        bridges_path,
+        provider.name,
+    )
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    print(f"bridge {combined_path} -> {bridges_path}", file=sys.stderr)
+    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
+    returncode = run_command(
+        provider.command,
+        args.repo_root,
+        prompt,
+        stdout_path,
+        stderr_path,
+        f"{provider.name}:bridges",
+    )
+
+    if returncode == 0 and bridges_path.exists():
+        validate_bridges_json(bridges_path)
+
+    completed_at = datetime.now(timezone.utc).isoformat()
+    record = {
+        "provider": provider.name,
+        "mode": "bridges",
+        "discovery_dir": str(args.discovery_dir),
+        "combined_path": str(combined_path),
+        "bridges_path": str(bridges_path),
+        "stdout_path": str(stdout_path),
+        "stderr_path": str(stderr_path),
+        "returncode": returncode,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "model": provider.model,
+        "effort": provider.effort,
+        "sandbox": provider.sandbox,
+    }
+    return BridgesResult(
+        record=record,
+        bridges_path=bridges_path,
+        stderr_path=stderr_path,
+        returncode=returncode,
+        created_bridges=bridges_path.exists(),
+    )
+
+
+def run_bridges(args: argparse.Namespace) -> int:
+    if not args.repo_root.exists():
+        raise SystemExit(f"repo root not found: {args.repo_root}")
+
+    combined_path = args.combined_dir / "combined.json"
+    if not combined_path.exists():
+        raise SystemExit(f"combined.json not found: {combined_path}")
+
+    template = load_template(args.template, ("{combined_path}", "{bridges_path}"))
+    bridges_path = args.bridges_dir / "bridges.json"
+    if bridges_path.exists() and not args.force:
+        print(f"skip bridges: {bridges_path} exists", file=sys.stderr)
+        return 0
+
+    print(f"combined path: {combined_path}", file=sys.stderr)
+    print(f"provider: {args.provider}", file=sys.stderr)
+    if args.dry_run:
+        print_bridges_dry_run(args, template)
+        return 0
+
+    args.bridges_dir.mkdir(parents=True, exist_ok=True)
+    result = run_bridges_once(args, template)
+    append_jsonl(args.run_log, result.record)
+    if result.returncode != 0:
+        print(
+            f"bridges failed with exit code {result.returncode}; "
+            f"see {result.stderr_path}",
+            file=sys.stderr,
+        )
+        return result.returncode
+    if not result.created_bridges:
+        print(
+            f"bridges completed but did not create {result.bridges_path}",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def bangers_path(args: argparse.Namespace, combined_index: int) -> Path:
     return args.bangers_dir / f"banger_{combined_index}.json"
 
@@ -513,19 +658,20 @@ def validate_bangers_json(path: Path) -> None:
 def print_bangers_dry_run(
     args: argparse.Namespace,
     template: str,
-    combined_index: int,
-    combined_element: dict[str, Any],
+    input_index: int,
+    input_element: dict[str, Any],
 ) -> None:
     provider = build_provider_command(args, args.repo_root)
-    output_path = bangers_path(args, combined_index)
+    output_path = bangers_path(args, input_index)
     prompt = render_bangers_prompt(
         template,
-        combined_element,
+        input_element,
         output_path,
         provider.name,
     )
-    print(f"\n--- combined element {combined_index} ---")
-    print(f"combined path: {args.combined_dir / 'combined.json'}")
+    print(f"\n--- banger input {input_index} ---")
+    print(f"banger input path: {banger_inputs_path(args)}")
+    print(f"input type: {input_element.get('type', 'goal')}")
     print(f"bangers path: {output_path}")
     print(f"agent workdir: {args.repo_root}")
     print(f"{provider.name} command:", " ".join(provider.command))
@@ -538,22 +684,22 @@ def print_bangers_dry_run(
 def run_bangers_once(
     args: argparse.Namespace,
     template: str,
-    combined_index: int,
-    combined_element: dict[str, Any],
+    input_index: int,
+    input_element: dict[str, Any],
 ) -> BangersResult:
     provider = build_provider_command(args, args.repo_root)
-    output_path = bangers_path(args, combined_index)
-    stdout_path = args.bangers_dir / f"banger_{combined_index}.{provider.name}.stdout.log"
-    stderr_path = args.bangers_dir / f"banger_{combined_index}.{provider.name}.stderr.log"
+    output_path = bangers_path(args, input_index)
+    stdout_path = args.bangers_dir / f"banger_{input_index}.{provider.name}.stdout.log"
+    stderr_path = args.bangers_dir / f"banger_{input_index}.{provider.name}.stderr.log"
     prompt = render_bangers_prompt(
         template,
-        combined_element,
+        input_element,
         output_path,
         provider.name,
     )
     started_at = datetime.now(timezone.utc).isoformat()
 
-    print(f"bangers combined {combined_index} -> {output_path}", file=sys.stderr)
+    print(f"bangers input {input_index} -> {output_path}", file=sys.stderr)
     print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
     returncode = run_command(
         provider.command,
@@ -561,7 +707,7 @@ def run_bangers_once(
         prompt,
         stdout_path,
         stderr_path,
-        f"{provider.name}:bangers:{combined_index}",
+        f"{provider.name}:bangers:{input_index}",
     )
 
     if returncode == 0 and output_path.exists():
@@ -574,7 +720,11 @@ def run_bangers_once(
         "discovery_dir": str(args.discovery_dir),
         "goals_dir": str(args.goals_dir),
         "combined_path": str(args.combined_dir / "combined.json"),
-        "combined_index": combined_index,
+        "banger_input_path": str(banger_inputs_path(args)),
+        "banger_input_index": input_index,
+        "input_type": input_element.get("type", "goal"),
+        "source_index": input_element.get("source_index", input_index),
+        "combined_index": input_index,
         "bangers_path": str(output_path),
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
@@ -586,7 +736,7 @@ def run_bangers_once(
         "sandbox": provider.sandbox,
     }
     return BangersResult(
-        combined_index=combined_index,
+        combined_index=input_index,
         record=record,
         bangers_path=output_path,
         stderr_path=stderr_path,
@@ -599,12 +749,15 @@ def run_bangers(args: argparse.Namespace) -> int:
     if not args.repo_root.exists():
         raise SystemExit(f"repo root not found: {args.repo_root}")
 
-    combined_path = args.combined_dir / "combined.json"
-    if not combined_path.exists():
-        raise SystemExit(f"combined.json not found: {combined_path}")
+    input_path = banger_inputs_path(args)
+    if not input_path.exists():
+        raise SystemExit(
+            f"banger input not found: {input_path}; run "
+            "scripts/build_suggestion_inputs.py after bridges"
+        )
 
     template = load_template(args.template, ("{combined_json_element}",))
-    elements = load_combined_json(combined_path)
+    elements = load_combined_json(input_path)
     selected = select_combined_elements(
         elements,
         args.combined_indexes,
@@ -612,10 +765,11 @@ def run_bangers(args: argparse.Namespace) -> int:
         args.limit,
     )
     if not selected:
-        print("no combined elements selected", file=sys.stderr)
+        print("no banger inputs selected", file=sys.stderr)
         return 0
 
-    print(f"selected combined elements: {len(selected)}", file=sys.stderr)
+    print(f"banger input path: {input_path}", file=sys.stderr)
+    print(f"selected banger inputs: {len(selected)}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
     print(f"jobs: {args.jobs}", file=sys.stderr)
 
@@ -624,7 +778,7 @@ def run_bangers(args: argparse.Namespace) -> int:
         output_path = bangers_path(args, combined_index)
         if output_path.exists() and not args.force:
             print(
-                f"skip combined element {combined_index}: {output_path} exists",
+                f"skip banger input {combined_index}: {output_path} exists",
                 file=sys.stderr,
             )
             continue
@@ -656,7 +810,7 @@ def run_bangers(args: argparse.Namespace) -> int:
             except Exception as exc:
                 failures += 1
                 print(
-                    f"combined element {combined_index} bangers failed: {exc}",
+                    f"banger input {combined_index} failed: {exc}",
                     file=sys.stderr,
                 )
                 if not args.continue_on_error:
@@ -669,7 +823,7 @@ def run_bangers(args: argparse.Namespace) -> int:
             if result.returncode != 0:
                 failures += 1
                 print(
-                    f"combined element {result.combined_index} bangers failed "
+                    f"banger input {result.combined_index} failed "
                     f"with exit code {result.returncode}; see {result.stderr_path}",
                     file=sys.stderr,
                 )
@@ -681,7 +835,7 @@ def run_bangers(args: argparse.Namespace) -> int:
             if not result.created_bangers:
                 failures += 1
                 print(
-                    f"combined element {result.combined_index} completed but did "
+                    f"banger input {result.combined_index} completed but did "
                     f"not create {result.bangers_path}",
                     file=sys.stderr,
                 )
@@ -1053,6 +1207,8 @@ def run(args: argparse.Namespace) -> int:
         return run_questions(args)
     if args.bangers:
         return run_bangers(args)
+    if args.bridges:
+        return run_bridges(args)
     if args.combine:
         return run_combine(args)
     return run_discovery(args)
