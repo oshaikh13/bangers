@@ -119,7 +119,7 @@ def numeric_scores(items: list[dict[str, Any]], key: str) -> list[int | float]:
 
 def aggregate_score_fields(items: list[dict[str, Any]]) -> dict[str, int | float | None]:
     output: dict[str, int | float | None] = {}
-    for key in ("usefulness", "confidence", "attention_gap"):
+    for key in ("usefulness", "confidence", "disregard"):
         scores = numeric_scores(items, key)
         if scores:
             output[key] = max(scores)
@@ -148,7 +148,7 @@ def build_goal_input(index: int, item: dict[str, Any]) -> dict[str, Any]:
         **time_bounds(timestamps),
         "usefulness": score_fields.get("usefulness"),
         "confidence": score_fields.get("confidence"),
-        "attention_gap": score_fields.get("attention_gap"),
+        "disregard": score_fields.get("disregard"),
         "context": required_string(item, "context", label),
         "reasoning": required_string(item, "reasoning", label),
         "description": required_string(item, "description", label),
@@ -172,7 +172,7 @@ def build_bridge_input(
         **bridge_time_bounds(item, combined),
         "usefulness": item.get("usefulness"),
         "confidence": item.get("confidence"),
-        "attention_gap": item.get("attention_gap"),
+        "disregard": item.get("disregard"),
         "context": required_string(item, "context", label),
         "reasoning": required_string(item, "reasoning", label),
         "description": required_string(item, "description", label),

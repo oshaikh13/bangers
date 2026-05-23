@@ -91,7 +91,7 @@ For each bridge goal, include:
 - `usefulness`: 1 to 10. Higher means recognizing this bridge goal would materially reduce risk, improve prioritization, reveal an important connection, or clarify what the user really needs.
 - `confidence`: 1 to 10. Higher means the connected goals strongly support the bridge goal.
 - `surprise`: 1 to 10. Higher means the bridge is non-obvious and likely to create an "aha" moment.
-- `attention_gap`: 1 to 10. Higher means the bridge goal appears to reflect something the user wants or needs, but is not giving focused attention right now / in the near future because of time pressure, competing commitments, avoidance, or context switching.
+- `disregard`: 1 to 10. Higher means the bridge goal appears to reflect something the user wants or needs, but is disregarding it right now / in the near future because of time pressure, competing commitments, avoidance, or context switching.
 
 High-surprise bridge goals can have lower confidence, but avoid pure speculation.
 
@@ -120,7 +120,7 @@ Use this exact schema:
     "usefulness": 1,
     "confidence": 1,
     "surprise": 1,
-    "attention_gap": 1
+    "disregard": 1
   }
 ]
 

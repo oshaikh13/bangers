@@ -71,29 +71,29 @@ Examples:
 - The user reads a vendor email thread, checks a pricing spreadsheet, and opens Slack. The goal is to communicate the pricing decision clearly to Priya, not merely draft a generic message.
 - The user discusses moving constraints with a roommate across messages and searches. The goal is to settle the move plan around budget, timing, packing, and open decisions, not merely create a checklist.
 
-## Scoring usefulness, confidence, and attention gap
+## Scoring usefulness, confidence, and disregard
 
-Every candidate must include `usefulness`, `confidence`, and `attention_gap`.
+Every candidate must include `usefulness`, `confidence`, and `disregard`.
 
-`usefulness` answers: if the user achieved this goal well, how valuable would that be for them?
+`usefulness`: if the user achieved this goal well, how valuable would that be for them?
 
 Score high usefulness when the goal would save substantial time, reduce meaningful frustration, unblock a decision, prepare the user for an important moment, prevent a likely mistake, or improve an outcome the user clearly cares about. A goal can be useful even if more information would be needed to fully execute it.
 
-`confidence` answers: how confident are you that the user actually has this goal in the first place?
+`confidence`: how confident are you that the user actually has this goal in the first place?
 
 Score high confidence when the goal is directly supported by repeated behavior, explicit searches, open artifacts, deadlines, meetings, messages, future follow-through, or strong cross-log evidence. Score lower confidence when the goal is a reasonable but speculative interpretation of ambiguous behavior.
 
 Highly useful goals may be more speculative, resulting in lower confidence. Similarly, you may be very confident in a goal, but its usefulness is less of a priority in the user's eyes.
 
-`attention_gap` answers: how likely is it that the user will NOT do this themselves now or in the immediate future because of time pressure, competing commitments, avoidance, context switching, etc.
+`disregard`: how likely is it that the user will disregard this goal  now or in the immediate future because of time pressure, competing commitments, avoidance, context switching, etc.
 
-Score high attention gap when the goal appears important but is being displaced by time pressure, competing commitments, productive avoidance, scattered context, repeated deferral, or context switching. Score low attention gap when the user is already honed in on the exact work and likely to do it immediately without help. You can look at future logs to determine this!
+Score high disregard when the goal appears important but is being displaced by time pressure, competing commitments, productive avoidance, scattered context, repeated deferral, or context switching. Score low disregard when the user is already honed in on the exact work and likely to do it immediately without help. You can look at future logs to determine this!
 
 Examples:
-- High attention gap: the user repeatedly opens a paper-writing checklist but keeps switching to adjacent debugging or admin work.
-- High attention gap: the user expresses interest in writing a post but only reads related articles and never starts drafting.
-- Low attention gap: the user is already in the tax filing flow, entering fields steadily, and has the source documents open.
-- Low attention gap: the user is actively debugging the exact error and already making the patch.
+- High disregard: the user opens a paper-writing checklist but keeps switching to adjacent debugging or admin work.
+- High disregard: the user expresses interest in writing a post but only reads related articles and never starts drafting.
+- Low disregard: the user is already in the tax filing flow, entering fields steadily, and has the source documents open.
+- Low disregard: the user is actively debugging the exact error and already making the patch.
 
 ## Proactive goal patterns
 
@@ -218,7 +218,8 @@ Example 1: Inference provider research
   "description": "Choose the inference provider setup that fits the user's actual model-serving workload, including cost, supported models, latency expectations, rate limits, batching support, and reliability concerns.",
   "goal": "Get from scattered provider research to a clear serving decision.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 2: Research analysis for LongNap
@@ -230,7 +231,8 @@ Example 2: Research analysis for LongNap
   "description": "Understand whether moments where the system asked clarifying or proactive questions led to better LongNap outcomes than moments where it did not.",
   "goal": "Identify which questioning behaviors lead to better LongNap outcomes and extract design implications for improving it.",
   "usefulness": "number from 1 to 10",
-  "confidence":"number from 1 to 10"
+  "confidence":"number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 3: Human-like terminal-use tasks
@@ -242,7 +244,8 @@ Example 3: Human-like terminal-use tasks
   "description": "Understand what patterns make terminal-use benchmark tasks feel artificial versus human-like.",
   "goal": "Use relevant datasets and examples to produce concrete task design recommendations.",
   "usefulness": "number from 1 to 10",
-  "confidence":"number from 1 to 10"
+  "confidence":"number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 4: Event outreach procrastination
@@ -254,7 +257,8 @@ Example 4: Event outreach procrastination
   "description": "Finish the event invitation outreach and resolve the lingering communication task.",
   "goal": "Have the invite language, follow-up variants, event description, and attendee tracking clear enough to move forward.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 5: Moving plan with roommate
@@ -266,7 +270,8 @@ Example 5: Moving plan with roommate
   "description": "Settle the move plan with the roommate around the move-in date, budget, neighborhood constraints, packing timeline, and open decisions.",
   "goal": "Reduce anxiety and make the move feel concrete and manageable before the deadline.",
   "usefulness": "number from 1 to 10",
-  "confidence":"number from 1 to 10"
+  "confidence":"number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 6: Answer found later
@@ -278,7 +283,8 @@ Example 6: Answer found later
   "description": "Resolve the specific Next.js caching issue caused by route segment config.",
   "goal": "Reach the fix earlier and avoid the documentation search loop.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 7: Upcoming customer call
@@ -290,7 +296,8 @@ Example 7: Upcoming customer call
   "description": "Walk into the Acme Corp onboarding call ready to move the account forward.",
   "goal": "Have open issues, prior decisions, and specific questions in mind before the meeting starts.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 8: Manual provider or product comparison
@@ -302,7 +309,8 @@ Example 8: Manual provider or product comparison
   "description": "Pick the right deployment platform for the side project based on cost, deployment complexity, background jobs, databases, and scaling limits.",
   "goal": "Commit to a deployment platform rather than continuing to manually compare options.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 9: Scattered context before a message
@@ -314,7 +322,8 @@ Example 9: Scattered context before a message
   "description": "Get the Linear contract decision communicated to Priya while the pricing context is fresh.",
   "goal": "Make the key constraint and open annual billing question clear enough for a quick decision.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 10: Repeated unresolved bug loop
@@ -326,7 +335,8 @@ Example 10: Repeated unresolved bug loop
   "description": "Get to the bottom of the recurring Sentry error by connecting the stack traces, affected users, and code paths already inspected.",
   "goal": "Identify the likely root cause and reach a clear next diagnostic step.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 11: Dense reading tied to project
@@ -338,7 +348,8 @@ Example 11: Dense reading tied to project
   "description": "Decide what retrieval evaluation direction to use for the support-search prototype, informed by the dense retrieval article the user just read.",
   "goal": "Have specific metrics, sample queries, and failure cases that can guide the prototype rather than continuing to absorb more background reading.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 12: Long legal or vendor review
@@ -350,7 +361,8 @@ Example 12: Long legal or vendor review
   "description": "Understand the termination, auto-renewal, payment, and liability risks in the vendor contract.",
   "goal": "Know the practical cancellation deadline and the consequences before renewal or commitment.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 13: Dashboard anomaly
@@ -362,7 +374,8 @@ Example 13: Dashboard anomaly
   "description": "Explain the Tuesday revenue spike by connecting it to invoices, customer upgrades, or one-time payments around that date.",
   "goal": "Understand whether the spike reflects real growth, an anomaly, or a one-off event.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 14: Repetitive inbox triage
@@ -374,7 +387,8 @@ Example 14: Repetitive inbox triage
   "description": "Reduce the inbox noise from repetitive GitHub notifications while keeping important review requests visible.",
   "goal": "Stop low-priority updates from repeatedly interrupting the user's workflow.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 15: Travel planning
@@ -386,7 +400,8 @@ Example 15: Travel planning
   "description": "Coordinate the Austin conference arrival plan across flight timing, transit, hotel check-in, and the first session.",
   "goal": "Arrive without last-minute scrambling.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 ## Required output
@@ -406,7 +421,7 @@ Use this exact schema:
     "goal": "one sentence stating the concrete outcome the user wants to reach",
     "usefulness": "on a scale from 1 to 10, how useful would achieving this goal be for the user?",
     "confidence": "on a scale from 1 to 10, how confident are you that the user actually has this goal in the first place?",
-    "attention_gap": "on a scale from 1 to 10, how much does the user seem to want or need this while not giving it focused attention in the near future?"
+    "disregard": "on a scale from 1 to 10, how much does the user seem to want or need this while not giving it focused attention in the near future?"
   }
 ]
 
@@ -415,5 +430,5 @@ Rules for the JSON:
 - Every candidate must describe one specific user goal.
 - Generate goals across the confidence range.
 - Every candidate must include an execution timestamp.
-- Every candidate must include integer `usefulness`, `confidence`, and `attention_gap` scores from 1 to 10.
+- Every candidate must include integer `usefulness`, `confidence`, and `disregard` scores from 1 to 10.
 - Every title must be specific enough that it could not apply to a different situation.

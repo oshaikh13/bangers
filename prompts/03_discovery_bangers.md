@@ -16,7 +16,7 @@ Inputs usually come from `02c_suggestion_inputs/inputs.json` and have one compac
   "time": "timestamp when the goal or bridge becomes visible",
   "usefulness": "number or null",
   "confidence": "number or null",
-  "attention_gap": "number or null",
+  "disregard": "number or null",
   "context": "short evidence summary",
   "reasoning": "why this goal or bridge matters",
   "description": "plain-language description of what the user is trying to accomplish"
@@ -112,7 +112,7 @@ For each suggestion, include:
 
 - `usefulness`: 1 to 10. How much value this suggestion would provide the user if they looked at it, on a scale from 1 to 10.
 - `confidence`: 1 to 10. How likely is the that the user will actually click on this suggestion if it was surfaced. Just because it's useful does not mean the user may actually look at it.
-- `attention_gap`: 1 to 10. How likely is it that the user will NOT do this themselves now or in the immediate future because of time pressure, competing commitments, avoidance, context switching, etc.
+- `disregard`: 1 to 10. How likely is it that the user will NOT do this themselves now or in the immediate future because of time pressure, competing commitments, avoidance, context switching, etc.
 
 ## Output format
 

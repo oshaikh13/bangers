@@ -184,7 +184,7 @@ Reads `02a_combined/combined.json` and `02b_bridges/bridges.json`, then writes:
 discovery_codex_15m/02c_suggestion_inputs/inputs.json
 ```
 
-This normalizes siloed goals and bridge goals into one compact input list for banger generation. Every row has the same fields: `type`, `name`, `time`, `usefulness`, `confidence`, `attention_gap`, `context`, `reasoning`, and `description`.
+This normalizes siloed goals and bridge goals into one compact input list for banger generation. Every row has the same fields: `type`, `name`, `time`, `usefulness`, `confidence`, `disregard`, `context`, `reasoning`, and `description`.
 
 The output is sorted by `time`. For siloed goals, `time` is the earliest source goal timestamp. For bridge goals, `time` is when the bridge first becomes knowable from its connected goals.
 

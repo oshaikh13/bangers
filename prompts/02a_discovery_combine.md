@@ -60,7 +60,7 @@ Use this exact schema:
         "time": "original execution timestamp or best available timestamp",
         "usefulness": "original usefulness score if available",
         "confidence": "original confidence score if available",
-        "attention_gap": "original attention_gap score if available"
+        "disregard": "original disregard score if available"
       }
     ]
   }
@@ -75,5 +75,5 @@ Use this exact schema:
 - Merge goals that are only wording variations of the same underlying task.
 - Do not drop source goals; every input goal should appear under exactly one combined goal unless it is malformed or unusable.
 - If a goal is malformed, skip it only if there is no recoverable name/title or timestamp.
-- Preserve `usefulness`, `confidence`, and `attention_gap` from source goals when available. If a source goal lacks one of these scores, omit that score for that source goal rather than inventing it.
+- Preserve `usefulness`, `confidence`, and `disregard` from source goals when available. If a source goal lacks one of these scores, omit that score for that source goal rather than inventing it.
 - Include `context`, `reasoning`, and `description` for every combined goal.
