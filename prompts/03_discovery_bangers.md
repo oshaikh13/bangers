@@ -112,7 +112,8 @@ For each suggestion, include:
 
 - `usefulness`: 1 to 10. How much value this suggestion would provide the user if they looked at it, on a scale from 1 to 10.
 - `confidence`: 1 to 10. How likely is the that the user will actually click on this suggestion if it was surfaced. Just because it's useful does not mean the user may actually look at it.
-- `disregard`: 1 to 10. How likely is it that the user will NOT do this themselves now or in the immediate future because of time pressure, competing commitments, avoidance, context switching, etc.
+- `disregard`: 1 to 10. How likely is it that the user will NOT do this themselves now or in the near future because of time pressure, competing commitments, avoidance, context switching, etc.
+- `surprise`: 1 to 10. Higher means the suggestion is non-obvious to the user and likely to create an "aha" moment.
 
 ## Output format
 
@@ -131,7 +132,10 @@ Use this shape:
           "why_now": string,
           "suggestion": string,
           "action": string,
-          "expected_artifact": string
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         }
       ]
     }
@@ -154,7 +158,11 @@ Minimal example:
           ],
           "why_now": "The user has clearly moved from casual browsing to active provider evaluation, and there is enough context to produce a useful comparison before they spend more time switching between tabs.",
           "suggestion": "I can compare these inference providers for your specific eval pipeline and recommend the best default plus a fallback option.",
-          "action": "Research Together AI, Fireworks, Groq, Replicate, and OpenRouter across pricing, latency, model availability, rate limits, batching support, reliability, and OpenAI-compatible API ergonomics. Then map each provider against the user's stated constraints."
+          "action": "Research Together AI, Fireworks, Groq, Replicate, and OpenRouter across pricing, latency, model availability, rate limits, batching support, reliability, and OpenAI-compatible API ergonomics. Then map each provider against the user's stated constraints.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         },
         {
           "timestamp": "2025-02-14T16:05:00",
@@ -165,7 +173,11 @@ Minimal example:
           ],
           "why_now": "The research phase appears mostly complete, and the user is now close to implementation. A recommendation would prevent the comparison from becoming open-ended deliberation.",
           "suggestion": "I can turn the provider research into a concrete implementation plan and pick the provider that minimizes code changes.",
-          "action": "Select a recommended provider, explain the tradeoff, identify the exact client wrapper changes needed, and draft a small migration checklist."
+          "action": "Select a recommended provider, explain the tradeoff, identify the exact client wrapper changes needed, and draft a small migration checklist.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         }
       ]
     },
@@ -181,7 +193,11 @@ Minimal example:
           ],
           "why_now": "The user is still forming their critique, so related work can shape the review before the main judgment is locked in.",
           "suggestion": "I can find closely related papers and summarize whether this paper is actually distinct from prior mixed-initiative systems.",
-          "action": "Search for related papers, group them by research angle, identify the closest baselines, and summarize what the reviewed paper adds or misses relative to them."
+          "action": "Search for related papers, group them by research angle, identify the closest baselines, and summarize what the reviewed paper adds or misses relative to them.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         },
         {
           "timestamp": "2025-02-15T11:40:00",
@@ -192,7 +208,11 @@ Minimal example:
           ],
           "why_now": "The intellectual content is mostly present, but the user still needs to turn it into a polished review. This is exactly where drafting assistance saves time without replacing judgment.",
           "suggestion": "I can turn your notes into a full structured review in your usual review style.",
-          "action": "Synthesize the notes into a review with summary, strengths, weaknesses, detailed comments, questions for authors, and an overall recommendation rationale."
+          "action": "Synthesize the notes into a review with summary, strengths, weaknesses, detailed comments, questions for authors, and an overall recommendation rationale.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         },
         {
           "timestamp": "2025-02-15T12:25:00",
@@ -203,7 +223,11 @@ Minimal example:
           ],
           "why_now": "The review is complete enough to critique, but it has not yet been submitted. This is the last high-leverage moment to improve fairness, specificity, and author-facing tone.",
           "suggestion": "I can check whether any parts of the review are unfair, under-supported, or discouraging to authors, and suggest more constructive wording.",
-          "action": "Review the draft for harsh language, unsupported claims, missing evidence, and places where critique could be made more actionable. Provide line-level edits."
+          "action": "Review the draft for harsh language, unsupported claims, missing evidence, and places where critique could be made more actionable. Provide line-level edits.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         }
       ]
     }

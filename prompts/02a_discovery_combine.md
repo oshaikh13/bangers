@@ -40,6 +40,32 @@ Definitions:
 - `reasoning`: why the source goals should be understood as one underlying goal.
 - `description`: what the user is trying to accomplish, phrased as a useful objective.
 
+## Updating usefulness, confidence, and disregard
+
+Every candidate must include `usefulness`, `confidence`, and `disregard`.
+
+Update these scores to be calibrated relative to the other goals. 
+
+`usefulness`: if the user achieved this goal well, how valuable would that be for them?
+
+Score high usefulness when the goal would save substantial time, reduce meaningful frustration, unblock a decision, prepare the user for an important moment, prevent a likely mistake, or improve an outcome the user clearly cares about. A goal can be useful even if more information would be needed to fully execute it.
+
+`confidence`: how confident are you that the user actually has this goal in the first place?
+
+Score high confidence when the goal is directly supported by repeated behavior, explicit searches, open artifacts, deadlines, meetings, messages, future follow-through, or strong cross-log evidence. Score lower confidence when the goal is a reasonable but speculative interpretation of ambiguous behavior.
+
+Highly useful goals may be more speculative, resulting in lower confidence. Similarly, you may be very confident in a goal, but its usefulness is less of a priority in the user's eyes.
+
+`disregard`: how likely is it that the user will disregard this goal  now or in the immediate future because of time pressure, competing commitments, avoidance, context switching, etc.
+
+Score high disregard when the goal appears important but is being displaced by time pressure, competing commitments, productive avoidance, scattered context, repeated deferral, or context switching. Score low disregard when the user is already honed in on the exact work and likely to do it immediately without help. You can look at future logs to determine this!
+
+Examples:
+- High disregard: the user opens a paper-writing checklist but keeps switching to adjacent debugging or admin work.
+- High disregard: the user expresses interest in writing a post but only reads related articles and never starts drafting.
+- Low disregard: the user is already in the tax filing flow, entering fields steadily, and has the source documents open.
+- Low disregard: the user is actively debugging the exact error and already making the patch.
+
 ## Output format
 
 Write a JSON array to:
@@ -58,9 +84,9 @@ Use this exact schema:
       {
         "name": "original goal name or title",
         "time": "original execution timestamp or best available timestamp",
-        "usefulness": "original usefulness score if available",
-        "confidence": "original confidence score if available",
-        "disregard": "original disregard score if available"
+        "usefulness": "updated usefulness score",
+        "confidence": "updated confidence score",
+        "disregard": "updated disregard score"
       }
     ]
   }

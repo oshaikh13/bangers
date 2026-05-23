@@ -90,12 +90,17 @@ For each bridge goal, include:
 
 - `usefulness`: 1 to 10. Higher means recognizing this bridge goal would materially reduce risk, improve prioritization, reveal an important connection, or clarify what the user really needs.
 - `confidence`: 1 to 10. Higher means the connected goals strongly support the bridge goal.
-- `surprise`: 1 to 10. Higher means the bridge is non-obvious and likely to create an "aha" moment.
 - `disregard`: 1 to 10. Higher means the bridge goal appears to reflect something the user wants or needs, but is disregarding it right now / in the near future because of time pressure, competing commitments, avoidance, or context switching.
+- `surprise`: 1 to 10. Higher means the bridge is non-obvious and likely to create an "aha" moment.
 
-High-surprise bridge goals can have lower confidence, but avoid pure speculation.
+High-surprise bridge goals can have lower confidence. Still, avoid pure speculation.
 
 ## Output format
+
+Here are examples of bridge goals:
+
+- Prioritizes homework over preparing for their upcoming travel.
+- Wants to find motivation to finish thier blog post, but instead spends time procrastinating.
 
 Write a JSON array to:
 
@@ -105,7 +110,7 @@ Use this exact schema:
 
 [
   {
-    "bridge": "concise name for the bridge goal",
+    "bridge": "name of the bridge goal",
     "context": "short evidence summary for this bridge goal",
     "reasoning": "why these connected goals reveal one broader motivation or tension",
     "description": "what the user is trying to accomplish at the bridge-goal level",

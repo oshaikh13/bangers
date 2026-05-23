@@ -214,7 +214,7 @@ Example 1: Inference provider research
 {
   "execution_timestamp": "2026-05-12T15:18:30",
   "context": "You searched for several inference providers and opened pricing/docs pages for Together, Fireworks, Groq, OpenRouter, and Baseten while working on model-serving decisions.",
-  "reasoning": "The searches show early-stage provider comparison, but the user's goal is not to open another tab. The goal is to make a cost and capability decision tailored to the workload. Future activity shows continued manual evaluation of providers, so surfacing this after the third provider search would likely save time.",
+  "reasoning": "The searches show early-stage provider comparison, but the user's goal is not to open another tab. The goal is to make a cost and capability decision tailored to the workload. The user is also likely to ignore this in the near term. A few hours later shows the user's continued manual evaluation of providers, so surfacing this after the third provider search would likely save time.",
   "description": "Choose the inference provider setup that fits the user's actual model-serving workload, including cost, supported models, latency expectations, rate limits, batching support, and reliability concerns.",
   "goal": "Get from scattered provider research to a clear serving decision.",
   "usefulness": "number from 1 to 10",
@@ -227,7 +227,7 @@ Example 2: Research analysis for LongNap
 {
   "execution_timestamp": "2026-05-09T11:42:00",
   "context": "You had an active research thread about whether asking questions improves LongNap-style memory behavior, and you later inspected logs related to user questions and downstream outcomes.",
-  "reasoning": "This is not just reading or note-taking; it implies an analysis goal. The relevant goal is to understand whether active questioning improves recall, task completion, or later usefulness.",
+  "reasoning": "This is not just reading or note-taking; it implies an analysis goal. The user won't have time to dig deeply into this. The relevant goal is to understand whether active questioning improves recall, task completion, or later usefulness.",
   "description": "Understand whether moments where the system asked clarifying or proactive questions led to better LongNap outcomes than moments where it did not.",
   "goal": "Identify which questioning behaviors lead to better LongNap outcomes and extract design implications for improving it.",
   "usefulness": "number from 1 to 10",
@@ -253,7 +253,7 @@ Example 4: Event outreach procrastination
 {
   "execution_timestamp": "2026-05-13T20:24:45",
   "context": "You were repeatedly returning to an unfinished email about organizing an event, with signs of hesitation and task switching before completing the outreach.",
-  "reasoning": "The behavior suggests procrastination around a communication-heavy task. The user's goal is to get the outreach finished so the event planning can move forward and stop lingering.",
+  "reasoning": "The behavior suggests procrastination around a communication-heavy task. The user's goal is to get the outreach finished so the event planning can move forward and stop lingering, but they are focused on debugging instead.",
   "description": "Finish the event invitation outreach and resolve the lingering communication task.",
   "goal": "Have the invite language, follow-up variants, event description, and attendee tracking clear enough to move forward.",
   "usefulness": "number from 1 to 10",
@@ -266,7 +266,7 @@ Example 5: Moving plan with roommate
 {
   "execution_timestamp": "2026-05-14T09:30:00",
   "context": "You and your roommate discussed moving plans, budget, neighborhood constraints, and anxiety about the move across messages, including some non-English conversation. Your move-in date created a clear deadline.",
-  "reasoning": "The moving task is distributed across personal conversations, calendar dates, searches, and budget constraints. A generic reminder would miss the underlying goal: settling the move plan with the roommate before the deadline creates stress.",
+  "reasoning": "The moving task is distributed across personal conversations, calendar dates, searches, and budget constraints. The user wants to settle the move plan with the roommate before the deadline creates stress.",
   "description": "Settle the move plan with the roommate around the move-in date, budget, neighborhood constraints, packing timeline, and open decisions.",
   "goal": "Reduce anxiety and make the move feel concrete and manageable before the deadline.",
   "usefulness": "number from 1 to 10",
@@ -305,7 +305,7 @@ Example 8: Manual provider or product comparison
 {
   "execution_timestamp": "2026-05-12T17:08:10",
   "context": "You repeatedly switched between Vercel, Render, and Fly.io pricing pages while evaluating where to deploy the side project.",
-  "reasoning": "The app switching and repeated revisits suggest the user was manually comparing options. The underlying goal is to make a deployment decision for the actual workload, not continue tab-hopping.",
+  "reasoning": "The app switching and repeated revisits suggest the user was manually comparing options. The underlying goal is to make a deployment decision for the actual workload, but the user will not have time to do a very comprehensive search.",
   "description": "Pick the right deployment platform for the side project based on cost, deployment complexity, background jobs, databases, and scaling limits.",
   "goal": "Commit to a deployment platform rather than continuing to manually compare options.",
   "usefulness": "number from 1 to 10",
