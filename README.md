@@ -208,6 +208,20 @@ Run a subset with:
 --combined-indexes 0,4,8-10
 ```
 
+Run several `02c_suggestion_inputs` in each model call:
+
+```bash
+uv run scripts/run_discovery_bangers.py --provider codex --combined-indexes 0-4 --banger-batch-size 5
+```
+
+This still writes one output file per input:
+
+```text
+discovery_codex_15m/03_bangers/banger_0.json
+discovery_codex_15m/03_bangers/banger_1.json
+...
+```
+
 Flatten all generated banger opportunities into one chronological list:
 
 ```bash

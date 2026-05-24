@@ -97,6 +97,17 @@ def render_bangers_prompt(
     )
 
 
+def render_bangers_batch_prompt(
+    template: str,
+    batch_elements: list[dict[str, Any]],
+    provider: str,
+) -> str:
+    return template.replace(
+        "{combined_json_element}",
+        json.dumps(batch_elements, ensure_ascii=False, sort_keys=True),
+    )
+
+
 def render_questions_prompt(
     template: str,
     suggestion_json: dict[str, Any],

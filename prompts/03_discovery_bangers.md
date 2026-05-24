@@ -1,32 +1,23 @@
 # Task
 
-Your job is to come up with creative, helpful, and concrete suggestions for a user given a set of goals.
+Your job is to come up with creative, helpful, and concrete suggestions for a user given a batch of goals.
 
-You may use subagents to help. You MUST search through additional logs (in the logs-indexed folder) for context in creating suggestions. Use the times to help identify relevant logs.
+You may use subagents to help. You MUST search through additional logs (in the logs-indexed folder) for context in creating suggestions, and for scoring suggestions. Use the times to help identify relevant logs.
 
 ## Input
 
 {combined_json_element}
 
-Inputs usually come from `02c_suggestion_inputs/inputs.json` and have one compact shape:
-
-{
-  "type": "goal or bridge",
-  "name": "goal or bridge name",
-  "time": "timestamp when the goal or bridge becomes visible",
-  "usefulness": "number or null",
-  "confidence": "number or null",
-  "disregard": "number or null",
-  "context": "short evidence summary",
-  "reasoning": "why this goal or bridge matters",
-  "description": "plain-language description of what the user is trying to accomplish"
-}
+The input is a batch. Each item has `input_index`, `output_path`, and `input`.
+The `input` object contains the goal or bridge fields: `type`, `name`, `time`,
+`usefulness`, `confidence`, `disregard`, `context`, `reasoning`, and
+`description`.
 
 For `type: "goal"`, generate suggestions that help the user make progress on the named siloed goal.
 
 For `type: "bridge"`, generate suggestions that act on the broader cross-goal motivation or tension implied by the name. Do not collapse the suggestion back into only one narrow subgoal unless log evidence shows that subgoal is the real leverage point.
 
-Use `name` as the goal to investigate, `time` as the starting point for log search, and `context`, `reasoning`, and `description` to understand the underlying situation before choosing concrete suggestions.
+For each batch item, use `input.name` as the goal to investigate, `input.time` as the starting point for log search, and `input.context`, `input.reasoning`, and `input.description` to understand the underlying situation before choosing concrete suggestions. Shared log searches across the batch are fine, but each output file must stay focused on its own batch item.
 
 ## How to help
 
@@ -117,7 +108,7 @@ For each suggestion, include:
 
 ## Output format
 
-Return JSON only. Do not include markdown, commentary, or extra text.
+For each batch item, write JSON only to its `output_path`. Do not include markdown, commentary, or extra text in those files.
 
 Use this shape:
 

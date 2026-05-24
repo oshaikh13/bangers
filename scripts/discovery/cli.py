@@ -140,6 +140,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of selected items to run concurrently. Defaults to 1.",
     )
     parser.add_argument(
+        "--banger-batch-size",
+        type=int,
+        default=1,
+        help=(
+            "With --bangers, number of 02c suggestion inputs to include in each "
+            "agent run. Defaults to 1 for one output file per run."
+        ),
+    )
+    parser.add_argument(
         "--no-isolate-agent-workdir",
         action="store_true",
         help=(
@@ -305,6 +314,8 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--interval-minutes must be greater than 0")
     if args.jobs <= 0:
         raise SystemExit("--jobs must be greater than 0")
+    if args.banger_batch_size <= 0:
+        raise SystemExit("--banger-batch-size must be greater than 0")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
     if (args.questions or args.bangers) and args.interval_indexes:
