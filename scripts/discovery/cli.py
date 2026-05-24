@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .paths import (
     DEFAULT_BANGERS_TEMPLATE,
+    DEFAULT_BRIDGES_TEMPLATE,
     DEFAULT_COMBINE_TEMPLATE,
     DEFAULT_DISCOVERY_TEMPLATE,
     DEFAULT_INTERVAL_MINUTES,
@@ -19,7 +20,7 @@ from .runner import run
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the discovery pipeline: goals, combine, bangers, questions."
+            "Run the discovery pipeline: goals, combine, bridges, bangers, questions."
         )
     )
     mode_group = parser.add_mutually_exclusive_group()
@@ -27,8 +28,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--combine",
         action="store_true",
         help=(
-            "Run prompts/02_discovery_combine.md over 01_goals and write "
-            "02_combined/combined.json."
+            "Run prompts/02a_discovery_combine.md over 01_goals and write "
+            "02a_combined/combined.json."
+        ),
+    )
+    mode_group.add_argument(
+        "--bridges",
+        action="store_true",
+        help=(
+            "Run prompts/02b_discovery_bridges.md over combined.json and write "
+            "02b_bridges/bridges.json."
         ),
     )
     mode_group.add_argument(
@@ -94,7 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--combined-indexes",
         help=(
             "With --bangers or --questions, comma-separated zero-based "
-            "combined.json indexes or ranges to run, e.g. `0,3,10-12`."
+            "banger input indexes or ranges to run, e.g. `0,3,10-12`. "
+            "When 02c_suggestion_inputs exists, these index that file."
         ),
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
@@ -128,6 +138,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Number of selected items to run concurrently. Defaults to 1.",
+    )
+    parser.add_argument(
+        "--banger-batch-size",
+        type=int,
+        default=1,
+        help=(
+            "With --bangers, number of 02c suggestion inputs to include in each "
+            "agent run. Defaults to 1 for one output file per run."
+        ),
     )
     parser.add_argument(
         "--no-isolate-agent-workdir",
@@ -295,6 +314,8 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--interval-minutes must be greater than 0")
     if args.jobs <= 0:
         raise SystemExit("--jobs must be greater than 0")
+    if args.banger_batch_size <= 0:
+        raise SystemExit("--banger-batch-size must be greater than 0")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
     if (args.questions or args.bangers) and args.interval_indexes:
@@ -310,6 +331,8 @@ def normalize_args(args: argparse.Namespace) -> None:
         default_template = DEFAULT_QUESTIONS_TEMPLATE
     elif args.bangers:
         default_template = DEFAULT_BANGERS_TEMPLATE
+    elif args.bridges:
+        default_template = DEFAULT_BRIDGES_TEMPLATE
     elif args.combine:
         default_template = DEFAULT_COMBINE_TEMPLATE
     else:
@@ -328,7 +351,9 @@ def normalize_args(args: argparse.Namespace) -> None:
         )
 
     args.goals_dir = args.discovery_dir / "01_goals"
-    args.combined_dir = args.discovery_dir / "02_combined"
+    args.combined_dir = args.discovery_dir / "02a_combined"
+    args.bridges_dir = args.discovery_dir / "02b_bridges"
+    args.suggestion_inputs_dir = args.discovery_dir / "02c_suggestion_inputs"
     args.bangers_dir = args.discovery_dir / "03_bangers"
     args.questions_dir = args.discovery_dir / "04_questions"
 
@@ -349,6 +374,8 @@ def normalize_args(args: argparse.Namespace) -> None:
     args.discovery_dir = args.discovery_dir.resolve()
     args.goals_dir = args.goals_dir.resolve()
     args.combined_dir = args.combined_dir.resolve()
+    args.bridges_dir = args.bridges_dir.resolve()
+    args.suggestion_inputs_dir = args.suggestion_inputs_dir.resolve()
     args.questions_dir = args.questions_dir.resolve()
     args.bangers_dir = args.bangers_dir.resolve()
     args.run_log = args.run_log.resolve()

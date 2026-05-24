@@ -71,19 +71,29 @@ Examples:
 - The user reads a vendor email thread, checks a pricing spreadsheet, and opens Slack. The goal is to communicate the pricing decision clearly to Priya, not merely draft a generic message.
 - The user discusses moving constraints with a roommate across messages and searches. The goal is to settle the move plan around budget, timing, packing, and open decisions, not merely create a checklist.
 
-## Scoring usefulness and confidence
+## Scoring usefulness, confidence, and disregard
 
-Every candidate must include both `usefulness` and `confidence`.
+Every candidate must include `usefulness`, `confidence`, and `disregard`.
 
-`usefulness` answers: if the user achieved this goal well, how valuable would that be for them?
+`usefulness`: if the user achieved this goal well, how valuable would that be for them?
 
 Score high usefulness when the goal would save substantial time, reduce meaningful frustration, unblock a decision, prepare the user for an important moment, prevent a likely mistake, or improve an outcome the user clearly cares about. A goal can be useful even if more information would be needed to fully execute it.
 
-`confidence` answers: how confident are you that the user actually has this goal in the first place?
+`confidence`: how confident are you that the user actually has this goal in the first place?
 
 Score high confidence when the goal is directly supported by repeated behavior, explicit searches, open artifacts, deadlines, meetings, messages, future follow-through, or strong cross-log evidence. Score lower confidence when the goal is a reasonable but speculative interpretation of ambiguous behavior.
 
 Highly useful goals may be more speculative, resulting in lower confidence. Similarly, you may be very confident in a goal, but its usefulness is less of a priority in the user's eyes.
+
+`disregard`: how likely is it that the user will disregard this goal  now or in the immediate future because of time pressure, competing commitments, avoidance, context switching, etc.
+
+Score high disregard when the goal appears important but is being displaced by time pressure, competing commitments, productive avoidance, scattered context, repeated deferral, or context switching. Score low disregard when the user is already honed in on the exact work and likely to do it immediately without help. You can look at future logs to determine this!
+
+Examples:
+- High disregard: the user opens a paper-writing checklist but keeps switching to adjacent debugging or admin work.
+- High disregard: the user expresses interest in writing a post but only reads related articles and never starts drafting.
+- Low disregard: the user is already in the tax filing flow, entering fields steadily, and has the source documents open.
+- Low disregard: the user is actively debugging the exact error and already making the patch.
 
 ## Proactive goal patterns
 
@@ -204,11 +214,12 @@ Example 1: Inference provider research
 {
   "execution_timestamp": "2026-05-12T15:18:30",
   "context": "You searched for several inference providers and opened pricing/docs pages for Together, Fireworks, Groq, OpenRouter, and Baseten while working on model-serving decisions.",
-  "reasoning": "The searches show early-stage provider comparison, but the user's goal is not to open another tab. The goal is to make a cost and capability decision tailored to the workload. Future activity shows continued manual evaluation of providers, so surfacing this after the third provider search would likely save time.",
+  "reasoning": "The searches show early-stage provider comparison, but the user's goal is not to open another tab. The goal is to make a cost and capability decision tailored to the workload. The user is also likely to ignore this in the near term. A few hours later shows the user's continued manual evaluation of providers, so surfacing this after the third provider search would likely save time.",
   "description": "Choose the inference provider setup that fits the user's actual model-serving workload, including cost, supported models, latency expectations, rate limits, batching support, and reliability concerns.",
   "goal": "Get from scattered provider research to a clear serving decision.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 2: Research analysis for LongNap
@@ -216,11 +227,12 @@ Example 2: Research analysis for LongNap
 {
   "execution_timestamp": "2026-05-09T11:42:00",
   "context": "You had an active research thread about whether asking questions improves LongNap-style memory behavior, and you later inspected logs related to user questions and downstream outcomes.",
-  "reasoning": "This is not just reading or note-taking; it implies an analysis goal. The relevant goal is to understand whether active questioning improves recall, task completion, or later usefulness.",
+  "reasoning": "This is not just reading or note-taking; it implies an analysis goal. The user won't have time to dig deeply into this. The relevant goal is to understand whether active questioning improves recall, task completion, or later usefulness.",
   "description": "Understand whether moments where the system asked clarifying or proactive questions led to better LongNap outcomes than moments where it did not.",
   "goal": "Identify which questioning behaviors lead to better LongNap outcomes and extract design implications for improving it.",
-  "usefulness": "number from 1 to 10"0,
-  "confidence":"number from 1 to 10"8
+  "usefulness": "number from 1 to 10",
+  "confidence":"number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 3: Human-like terminal-use tasks
@@ -231,8 +243,9 @@ Example 3: Human-like terminal-use tasks
   "reasoning": "The project calls for empirical analysis, not just brainstorming. Future behavior shows the user needed patterns from datasets, so the goal is to identify what makes terminal-use tasks feel artificial versus realistic.",
   "description": "Understand what patterns make terminal-use benchmark tasks feel artificial versus human-like.",
   "goal": "Use relevant datasets and examples to produce concrete task design recommendations.",
-  "usefulness": "number from 1 to 10"0,
-  "confidence":"number from 1 to 10"8
+  "usefulness": "number from 1 to 10",
+  "confidence":"number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 4: Event outreach procrastination
@@ -240,11 +253,12 @@ Example 4: Event outreach procrastination
 {
   "execution_timestamp": "2026-05-13T20:24:45",
   "context": "You were repeatedly returning to an unfinished email about organizing an event, with signs of hesitation and task switching before completing the outreach.",
-  "reasoning": "The behavior suggests procrastination around a communication-heavy task. The user's goal is to get the outreach finished so the event planning can move forward and stop lingering.",
+  "reasoning": "The behavior suggests procrastination around a communication-heavy task. The user's goal is to get the outreach finished so the event planning can move forward and stop lingering, but they are focused on debugging instead.",
   "description": "Finish the event invitation outreach and resolve the lingering communication task.",
   "goal": "Have the invite language, follow-up variants, event description, and attendee tracking clear enough to move forward.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 5: Moving plan with roommate
@@ -252,11 +266,12 @@ Example 5: Moving plan with roommate
 {
   "execution_timestamp": "2026-05-14T09:30:00",
   "context": "You and your roommate discussed moving plans, budget, neighborhood constraints, and anxiety about the move across messages, including some non-English conversation. Your move-in date created a clear deadline.",
-  "reasoning": "The moving task is distributed across personal conversations, calendar dates, searches, and budget constraints. A generic reminder would miss the underlying goal: settling the move plan with the roommate before the deadline creates stress.",
+  "reasoning": "The moving task is distributed across personal conversations, calendar dates, searches, and budget constraints. The user wants to settle the move plan with the roommate before the deadline creates stress.",
   "description": "Settle the move plan with the roommate around the move-in date, budget, neighborhood constraints, packing timeline, and open decisions.",
   "goal": "Reduce anxiety and make the move feel concrete and manageable before the deadline.",
-  "usefulness": "number from 1 to 10"0,
-  "confidence":"number from 1 to 10"9
+  "usefulness": "number from 1 to 10",
+  "confidence":"number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 6: Answer found later
@@ -268,7 +283,8 @@ Example 6: Answer found later
   "description": "Resolve the specific Next.js caching issue caused by route segment config.",
   "goal": "Reach the fix earlier and avoid the documentation search loop.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"0
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 7: Upcoming customer call
@@ -280,7 +296,8 @@ Example 7: Upcoming customer call
   "description": "Walk into the Acme Corp onboarding call ready to move the account forward.",
   "goal": "Have open issues, prior decisions, and specific questions in mind before the meeting starts.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 8: Manual provider or product comparison
@@ -288,11 +305,12 @@ Example 8: Manual provider or product comparison
 {
   "execution_timestamp": "2026-05-12T17:08:10",
   "context": "You repeatedly switched between Vercel, Render, and Fly.io pricing pages while evaluating where to deploy the side project.",
-  "reasoning": "The app switching and repeated revisits suggest the user was manually comparing options. The underlying goal is to make a deployment decision for the actual workload, not continue tab-hopping.",
+  "reasoning": "The app switching and repeated revisits suggest the user was manually comparing options. The underlying goal is to make a deployment decision for the actual workload, but the user will not have time to do a very comprehensive search.",
   "description": "Pick the right deployment platform for the side project based on cost, deployment complexity, background jobs, databases, and scaling limits.",
   "goal": "Commit to a deployment platform rather than continuing to manually compare options.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 9: Scattered context before a message
@@ -304,7 +322,8 @@ Example 9: Scattered context before a message
   "description": "Get the Linear contract decision communicated to Priya while the pricing context is fresh.",
   "goal": "Make the key constraint and open annual billing question clear enough for a quick decision.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 10: Repeated unresolved bug loop
@@ -316,7 +335,8 @@ Example 10: Repeated unresolved bug loop
   "description": "Get to the bottom of the recurring Sentry error by connecting the stack traces, affected users, and code paths already inspected.",
   "goal": "Identify the likely root cause and reach a clear next diagnostic step.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 11: Dense reading tied to project
@@ -328,7 +348,8 @@ Example 11: Dense reading tied to project
   "description": "Decide what retrieval evaluation direction to use for the support-search prototype, informed by the dense retrieval article the user just read.",
   "goal": "Have specific metrics, sample queries, and failure cases that can guide the prototype rather than continuing to absorb more background reading.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 12: Long legal or vendor review
@@ -340,7 +361,8 @@ Example 12: Long legal or vendor review
   "description": "Understand the termination, auto-renewal, payment, and liability risks in the vendor contract.",
   "goal": "Know the practical cancellation deadline and the consequences before renewal or commitment.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 13: Dashboard anomaly
@@ -352,7 +374,8 @@ Example 13: Dashboard anomaly
   "description": "Explain the Tuesday revenue spike by connecting it to invoices, customer upgrades, or one-time payments around that date.",
   "goal": "Understand whether the spike reflects real growth, an anomaly, or a one-off event.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 14: Repetitive inbox triage
@@ -364,7 +387,8 @@ Example 14: Repetitive inbox triage
   "description": "Reduce the inbox noise from repetitive GitHub notifications while keeping important review requests visible.",
   "goal": "Stop low-priority updates from repeatedly interrupting the user's workflow.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 Example 15: Travel planning
@@ -376,7 +400,8 @@ Example 15: Travel planning
   "description": "Coordinate the Austin conference arrival plan across flight timing, transit, hotel check-in, and the first session.",
   "goal": "Arrive without last-minute scrambling.",
   "usefulness": "number from 1 to 10",
-  "confidence": "number from 1 to 10"
+  "confidence": "number from 1 to 10",
+  "disregard": "number from 1 to 10"
 }
 
 ## Required output
@@ -394,8 +419,9 @@ Use this exact schema:
     "reasoning": "justify why this goal matters, what evidence supports it, and why this execution timestamp is the right time to surface it",
     "description": "1-2 sentences describing the user's goal, including the specific scope, dimensions, or decisions involved",
     "goal": "one sentence stating the concrete outcome the user wants to reach",
-    "usefulness": "number from 1 to 10"on a scale from 1 "number from 1 to 10"o 10, how useful would achieving this goal be for the user?",
-    "confidence": "on a scale from 1 to 10, how confident are you that the user actually has this goal in the first place?"
+    "usefulness": "on a scale from 1 to 10, how useful would achieving this goal be for the user?",
+    "confidence": "on a scale from 1 to 10, how confident are you that the user actually has this goal in the first place?",
+    "disregard": "on a scale from 1 to 10, how much does the user seem to want or need this while not giving it focused attention in the near future?"
   }
 ]
 
@@ -404,5 +430,5 @@ Rules for the JSON:
 - Every candidate must describe one specific user goal.
 - Generate goals across the confidence range.
 - Every candidate must include an execution timestamp.
-- Every candidate must include integer `usefulness` and `confidence` scores from 1 to 10.
+- Every candidate must include integer `usefulness`, `confidence`, and `disregard` scores from 1 to 10.
 - Every title must be specific enough that it could not apply to a different situation.

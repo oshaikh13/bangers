@@ -1,16 +1,25 @@
 # Task
 
-Your job is to come up with creative, helpful, and concrete suggestions for the user given a goal.
+Your job is to come up with creative, helpful, and concrete suggestions for a user given a batch of goals.
 
-You may use subagents to help. You MUST search through additional logs (in the logs-indexed folder) for context in creating suggestions. Use the times to help identify relevant logs.
+You may use subagents to help. You MUST search through additional logs (in the logs-indexed folder) for context in creating suggestions, and for scoring suggestions. Use the times to help identify relevant logs.
 
 ## Input
 
 {combined_json_element}
 
-## How to help
+The input is a batch. Each item has `input_index`, `output_path`, and `input`.
+The `input` object contains the goal or bridge fields: `type`, `name`, `time`,
+`usefulness`, `confidence`, `disregard`, `context`, `reasoning`, and
+`description`.
 
-A single goal may contain multiple distinct opportunities for help.
+For `type: "goal"`, generate suggestions that help the user make progress on the named siloed goal.
+
+For `type: "bridge"`, generate suggestions that act on the broader cross-goal motivation or tension implied by the name. Do not collapse the suggestion back into only one narrow subgoal unless log evidence shows that subgoal is the real leverage point.
+
+For each batch item, use `input.name` as the goal to investigate, `input.time` as the starting point for log search, and `input.context`, `input.reasoning`, and `input.description` to understand the underlying situation before choosing concrete suggestions. Shared log searches across the batch are fine, but each output file must stay focused on its own batch item.
+
+## How to help
 
 Do not assume there is only one “best” suggestion per goal. Instead, identify the different moments where the system could usefully intervene. Each opportunity should correspond to a specific point in time, a specific user context, and a specific kind of assistance.
 
@@ -27,7 +36,7 @@ Each of these should be treated as a separate opportunity with its own timestamp
 
 Great suggestions are things that:
 
-- Accelerate an active goal the user is already pursuing
+- Accelerate a goal the user might not have time to pursue.
 - Consolidate scattered context into a decision, message, plan, or artifact
 - Prepare for an upcoming moment where context will matter
 - Resolve repeated loops, hesitation, or unresolved cognitive load
@@ -42,7 +51,7 @@ Here are a few examples of great suggestions — these are suggestions that are 
 1. Comparative research before a decision
   - Context: The user was evaluating inference providers.
   - Great suggestion: “I can research the major inference providers, compare them across latency, pricing, model support, reliability, API ergonomics, and deployment constraints, then produce a concrete recommendation for your use case.”
-  - Why it is good: It turns scattered exploration into a decision-ready artifact.
+  - Why it is good: It turns scattered exploration into a decision-ready artifact; and it's something a user might not have time to do.
 
 2. Briefing before meeting a new person
   - Context: The user was about to meet someone new.
@@ -52,7 +61,7 @@ Here are a few examples of great suggestions — these are suggestions that are 
 3. Training run analysis
   - Context: The user was training a model on Tinker and the logs were stored locally.
   - Great suggestion: “I can analyze the local training logs, plot loss curves and other metrics, flag anomalies, compare runs, and summarize what seems to be working or failing.”
-  - Why it is good: It investigates meaningful anomalies and produces actionable debugging insight.
+  - Why it is good: It investigates meaningful anomalies and produces actionable debugging insight; and it's also something you think the user doesn't have figured out yet.
 
 4. Paper-review drafting
   - Context: The user had notes on a paper review but still needed to write the full review.
@@ -72,7 +81,7 @@ Here are a few examples of great suggestions — these are suggestions that are 
 7. Slide review before a talk
   - Context: The user has a slide deck for an upcoming talk and there is enough context about the talk content and audience.
   - Great suggestion: “I can review your slides based on what you’re trying to communicate and who you’re presenting to, then give concrete suggestions on what to improve, cut, reorder, clarify, or redesign.”
-  - Why it is good: It helps the user improve the presentation at the moment when the deck is concrete enough to critique but still early enough to revise before presenting.
+  - Why it is good: It helps the user improve the presentation at the moment when the deck is concrete enough to critique but still early enough to revise before presenting. The user also likely won't think of or have time to solicit critique right away.
 
 ## Timestamps
 
@@ -88,9 +97,18 @@ For each opportunity, include:
 - The concrete action the system should offer to take
 - The expected output artifact, such as a report, draft, plan, plot, agenda, email, outline, critique, or recommendation
 
+## Scoring
+
+For each suggestion, include:
+
+- `usefulness`: 1 to 10. How much value this suggestion would provide the user if they looked at it, on a scale from 1 to 10.
+- `confidence`: 1 to 10. How likely is the that the user will actually click on this suggestion if it was surfaced. Just because it's useful does not mean the user may actually look at it.
+- `disregard`: 1 to 10. How likely is it that the user will NOT do this themselves now or in the near future because of time pressure, competing commitments, avoidance, context switching, etc.
+- `surprise`: 1 to 10. Higher means the suggestion is non-obvious to the user and likely to create an "aha" moment.
+
 ## Output format
 
-Return JSON only. Do not include markdown, commentary, or extra text.
+For each batch item, write JSON only to its `output_path`. Do not include markdown, commentary, or extra text in those files.
 
 Use this shape:
 
@@ -105,7 +123,10 @@ Use this shape:
           "why_now": string,
           "suggestion": string,
           "action": string,
-          "expected_artifact": string
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         }
       ]
     }
@@ -128,7 +149,11 @@ Minimal example:
           ],
           "why_now": "The user has clearly moved from casual browsing to active provider evaluation, and there is enough context to produce a useful comparison before they spend more time switching between tabs.",
           "suggestion": "I can compare these inference providers for your specific eval pipeline and recommend the best default plus a fallback option.",
-          "action": "Research Together AI, Fireworks, Groq, Replicate, and OpenRouter across pricing, latency, model availability, rate limits, batching support, reliability, and OpenAI-compatible API ergonomics. Then map each provider against the user's stated constraints."
+          "action": "Research Together AI, Fireworks, Groq, Replicate, and OpenRouter across pricing, latency, model availability, rate limits, batching support, reliability, and OpenAI-compatible API ergonomics. Then map each provider against the user's stated constraints.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         },
         {
           "timestamp": "2025-02-14T16:05:00",
@@ -139,7 +164,11 @@ Minimal example:
           ],
           "why_now": "The research phase appears mostly complete, and the user is now close to implementation. A recommendation would prevent the comparison from becoming open-ended deliberation.",
           "suggestion": "I can turn the provider research into a concrete implementation plan and pick the provider that minimizes code changes.",
-          "action": "Select a recommended provider, explain the tradeoff, identify the exact client wrapper changes needed, and draft a small migration checklist."
+          "action": "Select a recommended provider, explain the tradeoff, identify the exact client wrapper changes needed, and draft a small migration checklist.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         }
       ]
     },
@@ -155,7 +184,11 @@ Minimal example:
           ],
           "why_now": "The user is still forming their critique, so related work can shape the review before the main judgment is locked in.",
           "suggestion": "I can find closely related papers and summarize whether this paper is actually distinct from prior mixed-initiative systems.",
-          "action": "Search for related papers, group them by research angle, identify the closest baselines, and summarize what the reviewed paper adds or misses relative to them."
+          "action": "Search for related papers, group them by research angle, identify the closest baselines, and summarize what the reviewed paper adds or misses relative to them.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         },
         {
           "timestamp": "2025-02-15T11:40:00",
@@ -166,7 +199,11 @@ Minimal example:
           ],
           "why_now": "The intellectual content is mostly present, but the user still needs to turn it into a polished review. This is exactly where drafting assistance saves time without replacing judgment.",
           "suggestion": "I can turn your notes into a full structured review in your usual review style.",
-          "action": "Synthesize the notes into a review with summary, strengths, weaknesses, detailed comments, questions for authors, and an overall recommendation rationale."
+          "action": "Synthesize the notes into a review with summary, strengths, weaknesses, detailed comments, questions for authors, and an overall recommendation rationale.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         },
         {
           "timestamp": "2025-02-15T12:25:00",
@@ -177,7 +214,11 @@ Minimal example:
           ],
           "why_now": "The review is complete enough to critique, but it has not yet been submitted. This is the last high-leverage moment to improve fairness, specificity, and author-facing tone.",
           "suggestion": "I can check whether any parts of the review are unfair, under-supported, or discouraging to authors, and suggest more constructive wording.",
-          "action": "Review the draft for harsh language, unsupported claims, missing evidence, and places where critique could be made more actionable. Provide line-level edits."
+          "action": "Review the draft for harsh language, unsupported claims, missing evidence, and places where critique could be made more actionable. Provide line-level edits.",
+          "usefulness": 1,
+          "confidence": 1,
+          "surprise": 1,
+          "disregard": 1
         }
       ]
     }
