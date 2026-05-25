@@ -25,6 +25,7 @@ def run_command(
     stdout_path: Path,
     stderr_path: Path,
     prefix: str,
+    env: dict[str, str] | None = None,
 ) -> int:
     with stdout_path.open("w", encoding="utf-8") as stdout_log, stderr_path.open(
         "w", encoding="utf-8"
@@ -32,6 +33,7 @@ def run_command(
         proc = subprocess.Popen(
             command,
             cwd=cwd,
+            env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -61,4 +63,3 @@ def run_command(
         stdout_thread.join()
         stderr_thread.join()
         return returncode
-

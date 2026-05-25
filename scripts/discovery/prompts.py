@@ -111,12 +111,19 @@ def render_bangers_batch_prompt(
 def render_questions_prompt(
     template: str,
     suggestion_json: dict[str, Any],
+    context_events: list[dict[str, Any]],
     questions_path: Path,
     provider: str,
 ) -> str:
-    rendered = template.replace(
-        "{suggestion_json}",
-        json.dumps(suggestion_json, ensure_ascii=False, sort_keys=True),
+    rendered = (
+        template.replace(
+            "{suggestion_json}",
+            json.dumps(suggestion_json, ensure_ascii=False, sort_keys=True),
+        )
+        .replace(
+            "{context_events_json}",
+            json.dumps(context_events, ensure_ascii=False, sort_keys=True),
+        )
     )
     return (
         rendered
