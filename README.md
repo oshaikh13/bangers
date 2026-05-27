@@ -247,6 +247,23 @@ discovery_codex_15m/04_questions/final_questions.json
 
 `final_questions.json` is the final consolidated artifact.
 
+Each question file stores the exact 100 past context events used for training:
+
+```text
+context_events + question -> answer
+```
+
+The stored artifact also keeps generation metadata such as `why_it_matters`,
+`evidence_grounding`, `banger_dimension`, and `question_basis`.
+
+Export the training-visible JSONL rows, excluding generation metadata:
+
+```bash
+uv run scripts/export_training_questions.py \
+  --input discovery_codex_15m/04_questions/final_questions.json \
+  --output discovery_codex_15m/04_questions/training_questions.jsonl
+```
+
 ## Common Options
 
 Use a different output root:

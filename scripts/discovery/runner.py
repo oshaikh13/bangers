@@ -28,6 +28,11 @@ from .prompts import (
     render_discovery_prompt,
     render_questions_prompt,
 )
+from .question_context import (
+    QUESTION_CONTEXT_EVENT_COUNT,
+    context_events_for_timestamp,
+    load_indexed_events,
+)
 from .providers import build_provider_command
 
 SCREENSHOTS_DIR = "screenshots"
@@ -106,7 +111,7 @@ def count_files(root: Path) -> int:
 def hardlink_screenshot_tree(
     src: Path,
     dst: Path,
-    interval_index: int,
+    label: str,
     progress_every: int,
 ) -> None:
     total = count_files(src)
@@ -116,7 +121,7 @@ def hardlink_screenshot_tree(
     for src_file, rel_path in tqdm(
         files,
         total=total,
-        desc=f"startup interval {interval_index}",
+        desc=f"startup {label}",
         unit="img",
         miniters=miniters,
         mininterval=0.5,
@@ -135,7 +140,7 @@ def hardlink_screenshot_tree(
             ) from exc
 
 
-def symlink_screenshot_tree(src: Path, dst: Path, interval_index: int) -> None:
+def symlink_screenshot_tree(src: Path, dst: Path, label: str) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.symlink(src, dst, target_is_directory=True)
@@ -145,13 +150,17 @@ def symlink_screenshot_tree(src: Path, dst: Path, interval_index: int) -> None:
             f"{src} -> {dst}: {exc}"
         ) from exc
     tqdm.write(
-        f"startup interval {interval_index}: symlinked screenshots directory",
+        f"startup {label}: symlinked screenshots directory",
         file=sys.stderr,
     )
 
 
-def copy_logs_indexed(src: Path, dst: Path, args: argparse.Namespace,
-                      interval_index: int) -> None:
+def copy_logs_indexed(
+    src: Path,
+    dst: Path,
+    args: argparse.Namespace,
+    label: str,
+) -> None:
     if not src.exists():
         raise SystemExit(f"logs-indexed not found: {src}")
 
@@ -165,26 +174,33 @@ def copy_logs_indexed(src: Path, dst: Path, args: argparse.Namespace,
     if src_screenshots.exists():
         dst_screenshots = dst / SCREENSHOTS_DIR
         if args.screenshot_link_mode == "symlink":
-            symlink_screenshot_tree(src_screenshots, dst_screenshots, interval_index)
+            symlink_screenshot_tree(src_screenshots, dst_screenshots, label)
         else:
             hardlink_screenshot_tree(
                 src_screenshots,
                 dst_screenshots,
-                interval_index,
+                label,
                 args.startup_progress_every,
             )
 
 
-def create_isolated_workdir(args: argparse.Namespace, interval_index: int) -> Path:
+def create_isolated_workdir(
+    args: argparse.Namespace,
+    label: str | int,
+    *,
+    include_logs_indexed: bool = True,
+) -> Path:
+    label = str(label)
     workdir = Path(
-        tempfile.mkdtemp(prefix=f"discovery-{args.provider}-{interval_index}-")
+        tempfile.mkdtemp(prefix=f"discovery-{args.provider}-{label}-")
     ).resolve()
-    copy_logs_indexed(
-        args.repo_root / "logs-indexed",
-        workdir / "logs-indexed",
-        args,
-        interval_index,
-    )
+    if include_logs_indexed:
+        copy_logs_indexed(
+            args.repo_root / "logs-indexed",
+            workdir / "logs-indexed",
+            args,
+            label,
+        )
     (workdir / "agent-output").mkdir()
     subprocess.run(["git", "init", "-q"], cwd=workdir, check=True)
     return workdir
@@ -197,7 +213,8 @@ def cleanup_isolated_workdir(args: argparse.Namespace, workdir: Path) -> None:
     shutil.rmtree(workdir)
 
 
-def copy_goal_atomically(src: Path, dst: Path) -> None:
+def copy_file_atomically(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(f".{dst.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
     try:
         shutil.copy2(src, tmp)
@@ -244,7 +261,7 @@ def run_one_interval(
             f"{provider.name}:{interval_index}",
         )
         if agent_goal_path.exists() and agent_goal_path != goal_path:
-            copy_goal_atomically(agent_goal_path, goal_path)
+            copy_file_atomically(agent_goal_path, goal_path)
     finally:
         if isolated_workdir is not None:
             cleanup_isolated_workdir(args, isolated_workdir)
@@ -258,7 +275,7 @@ def run_one_interval(
         "goal_path": str(goal_path),
         "agent_goal_path": str(agent_goal_path),
         "agent_isolated": not args.no_isolate_agent_workdir,
-        "agent_visible_roots": ["logs-indexed"]
+        "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
         "stdout_path": str(stdout_path),
@@ -381,8 +398,34 @@ def validate_questions_json(path: Path) -> None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"questions output is not valid JSON: {path}: {exc}") from exc
+    validate_questions_data(data, path)
+
+
+def validate_questions_data(data: Any, path: Path | str) -> None:
     if not isinstance(data, dict):
         raise RuntimeError(f"questions output must be a JSON object: {path}")
+    context_events = data.get("context_events")
+    if not isinstance(context_events, list):
+        raise RuntimeError(f"questions output must include context_events: {path}")
+    if len(context_events) > QUESTION_CONTEXT_EVENT_COUNT:
+        raise RuntimeError(
+            f"questions output context_events must have at most "
+            f"{QUESTION_CONTEXT_EVENT_COUNT} events: {path}"
+        )
+    valid_context_indexes: set[int] = set()
+    for index, event in enumerate(context_events):
+        if not isinstance(event, dict):
+            raise RuntimeError(
+                f"questions output context_events[{index}] must be an object: {path}"
+            )
+        event_index = event.get("index")
+        if event_index != index:
+            raise RuntimeError(
+                f"questions output context_events indexes must be contiguous "
+                f"from 0: {path}"
+            )
+        valid_context_indexes.add(index)
+
     if "qa_pairs" not in data:
         raise RuntimeError(f"questions output must include qa_pairs: {path}")
     if not isinstance(data["qa_pairs"], list):
@@ -392,52 +435,159 @@ def validate_questions_json(path: Path) -> None:
             raise RuntimeError(
                 f"questions output qa_pairs[{index}] must be an object: {path}"
             )
+        for key in (
+            "question",
+            "answer",
+            "banger_dimension",
+            "question_basis",
+            "why_it_matters",
+            "evidence_grounding",
+            "question_difficulty",
+        ):
+            if key not in pair:
+                raise RuntimeError(
+                    f"questions output qa_pairs[{index}] must include {key}: {path}"
+                )
+        for key in (
+            "question",
+            "answer",
+            "banger_dimension",
+            "why_it_matters",
+            "evidence_grounding",
+        ):
+            if not isinstance(pair.get(key), str) or not pair.get(key):
+                raise RuntimeError(
+                    f"questions output qa_pairs[{index}].{key} must be a "
+                    f"non-empty string: {path}"
+                )
+        if not isinstance(pair.get("question_difficulty"), (int, float)):
+            raise RuntimeError(
+                f"questions output qa_pairs[{index}].question_difficulty must "
+                f"be a number: {path}"
+            )
+        question_basis = pair.get("question_basis")
+        if not isinstance(question_basis, dict):
+            raise RuntimeError(
+                f"questions output qa_pairs[{index}].question_basis must be "
+                f"an object: {path}"
+            )
+        if not isinstance(question_basis.get("reason"), str) or not question_basis.get(
+            "reason"
+        ):
+            raise RuntimeError(
+                f"questions output qa_pairs[{index}].question_basis.reason "
+                f"must be a non-empty string: {path}"
+            )
+        basis_indexes = question_basis.get("context_event_indexes")
+        if not isinstance(basis_indexes, list) or not basis_indexes:
+            raise RuntimeError(
+                f"questions output qa_pairs[{index}].question_basis."
+                f"context_event_indexes must be a non-empty array: {path}"
+            )
+        for basis_index in basis_indexes:
+            if not isinstance(basis_index, int):
+                raise RuntimeError(
+                    f"questions output qa_pairs[{index}].question_basis."
+                    f"context_event_indexes must contain integers: {path}"
+                )
+            if basis_index not in valid_context_indexes:
+                raise RuntimeError(
+                    f"questions output qa_pairs[{index}] references missing "
+                    f"context event index {basis_index}: {path}"
+                )
 
 
 def print_combine_dry_run(args: argparse.Namespace, template: str) -> None:
-    provider = build_provider_command(args, args.repo_root)
+    isolated_workdir: Path | None = None
     combined_path = args.combined_dir / "combined.json"
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_goals_dir = args.goals_dir
+        agent_combined_path = combined_path
+    else:
+        agent_workdir = create_isolated_workdir(
+            args,
+            "combine",
+            include_logs_indexed=False,
+        )
+        isolated_workdir = agent_workdir
+        agent_goals_dir = agent_workdir / "agent-input" / "goals"
+        agent_goals_dir.mkdir(parents=True)
+        for path in goal_files(args.goals_dir):
+            copy_file_atomically(path, agent_goals_dir / path.name)
+        agent_combined_path = agent_workdir / "agent-output" / "combined.json"
+
+    provider = build_provider_command(args, agent_workdir)
     prompt = render_combine_prompt(
         template,
-        args.goals_dir,
-        combined_path,
+        agent_goals_dir,
+        agent_combined_path,
         provider.name,
     )
     print("\n--- combine goals ---")
     print(f"goals dir: {args.goals_dir}")
     print(f"combined path: {combined_path}")
-    print(f"agent workdir: {args.repo_root}")
+    print(f"agent workdir: {agent_workdir}")
+    print(f"agent goals dir: {agent_goals_dir}")
+    print(f"agent combined path: {agent_combined_path}")
     print(f"{provider.name} command:", " ".join(provider.command))
     if args.print_prompt:
         print(prompt)
     else:
         print(prompt[:1200] + ("..." if len(prompt) > 1200 else ""))
+    if isolated_workdir is not None:
+        cleanup_isolated_workdir(args, isolated_workdir)
 
 
 def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
-    provider = build_provider_command(args, args.repo_root)
     combined_path = args.combined_dir / "combined.json"
+    files = goal_files(args.goals_dir)
+
+    isolated_workdir: Path | None = None
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_goals_dir = args.goals_dir
+        agent_combined_path = combined_path
+    else:
+        agent_workdir = create_isolated_workdir(
+            args,
+            "combine",
+            include_logs_indexed=False,
+        )
+        isolated_workdir = agent_workdir
+        agent_goals_dir = agent_workdir / "agent-input" / "goals"
+        agent_goals_dir.mkdir(parents=True)
+        for path in files:
+            copy_file_atomically(path, agent_goals_dir / path.name)
+        agent_combined_path = agent_workdir / "agent-output" / "combined.json"
+
+    provider = build_provider_command(args, agent_workdir)
     stdout_path = args.combined_dir / f"combined.{provider.name}.stdout.log"
     stderr_path = args.combined_dir / f"combined.{provider.name}.stderr.log"
     prompt = render_combine_prompt(
         template,
-        args.goals_dir,
-        combined_path,
+        agent_goals_dir,
+        agent_combined_path,
         provider.name,
     )
     started_at = datetime.now(timezone.utc).isoformat()
-    files = goal_files(args.goals_dir)
 
     print(f"combine {len(files)} goal files -> {combined_path}", file=sys.stderr)
     print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    returncode = run_command(
-        provider.command,
-        args.repo_root,
-        prompt,
-        stdout_path,
-        stderr_path,
-        f"{provider.name}:combine",
-    )
+    try:
+        returncode = run_command(
+            provider.command,
+            agent_workdir,
+            prompt,
+            stdout_path,
+            stderr_path,
+            f"{provider.name}:combine",
+        )
+        if agent_combined_path.exists() and agent_combined_path != combined_path:
+            copy_file_atomically(agent_combined_path, combined_path)
+    finally:
+        if isolated_workdir is not None:
+            cleanup_isolated_workdir(args, isolated_workdir)
 
     if returncode == 0 and combined_path.exists():
         validate_combined_json(combined_path)
@@ -449,6 +599,10 @@ def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
         "discovery_dir": str(args.discovery_dir),
         "goals_dir": str(args.goals_dir),
         "combined_path": str(combined_path),
+        "agent_isolated": not args.no_isolate_agent_workdir,
+        "agent_visible_roots": ["agent-input", "agent-output"]
+        if not args.no_isolate_agent_workdir
+        else ["repo_root"],
         "goal_count": len(files),
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
@@ -527,50 +681,92 @@ def validate_bridges_json(path: Path) -> None:
 
 
 def print_bridges_dry_run(args: argparse.Namespace, template: str) -> None:
-    provider = build_provider_command(args, args.repo_root)
     combined_path = args.combined_dir / "combined.json"
     bridges_path = args.bridges_dir / "bridges.json"
+    isolated_workdir: Path | None = None
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_combined_path = combined_path
+        agent_bridges_path = bridges_path
+    else:
+        agent_workdir = create_isolated_workdir(
+            args,
+            "bridges",
+            include_logs_indexed=False,
+        )
+        isolated_workdir = agent_workdir
+        agent_combined_path = agent_workdir / "agent-input" / "combined.json"
+        copy_file_atomically(combined_path, agent_combined_path)
+        agent_bridges_path = agent_workdir / "agent-output" / "bridges.json"
+
+    provider = build_provider_command(args, agent_workdir)
     prompt = render_bridges_prompt(
         template,
-        combined_path,
-        bridges_path,
+        agent_combined_path,
+        agent_bridges_path,
         provider.name,
     )
     print("\n--- bridge goals ---")
     print(f"combined path: {combined_path}")
     print(f"bridges path: {bridges_path}")
-    print(f"agent workdir: {args.repo_root}")
+    print(f"agent workdir: {agent_workdir}")
+    print(f"agent combined path: {agent_combined_path}")
+    print(f"agent bridges path: {agent_bridges_path}")
     print(f"{provider.name} command:", " ".join(provider.command))
     if args.print_prompt:
         print(prompt)
     else:
         print(prompt[:1200] + ("..." if len(prompt) > 1200 else ""))
+    if isolated_workdir is not None:
+        cleanup_isolated_workdir(args, isolated_workdir)
 
 
 def run_bridges_once(args: argparse.Namespace, template: str) -> BridgesResult:
-    provider = build_provider_command(args, args.repo_root)
     combined_path = args.combined_dir / "combined.json"
     bridges_path = args.bridges_dir / "bridges.json"
+    isolated_workdir: Path | None = None
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_combined_path = combined_path
+        agent_bridges_path = bridges_path
+    else:
+        agent_workdir = create_isolated_workdir(
+            args,
+            "bridges",
+            include_logs_indexed=False,
+        )
+        isolated_workdir = agent_workdir
+        agent_combined_path = agent_workdir / "agent-input" / "combined.json"
+        copy_file_atomically(combined_path, agent_combined_path)
+        agent_bridges_path = agent_workdir / "agent-output" / "bridges.json"
+
+    provider = build_provider_command(args, agent_workdir)
     stdout_path = args.bridges_dir / f"bridges.{provider.name}.stdout.log"
     stderr_path = args.bridges_dir / f"bridges.{provider.name}.stderr.log"
     prompt = render_bridges_prompt(
         template,
-        combined_path,
-        bridges_path,
+        agent_combined_path,
+        agent_bridges_path,
         provider.name,
     )
     started_at = datetime.now(timezone.utc).isoformat()
 
     print(f"bridge {combined_path} -> {bridges_path}", file=sys.stderr)
     print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    returncode = run_command(
-        provider.command,
-        args.repo_root,
-        prompt,
-        stdout_path,
-        stderr_path,
-        f"{provider.name}:bridges",
-    )
+    try:
+        returncode = run_command(
+            provider.command,
+            agent_workdir,
+            prompt,
+            stdout_path,
+            stderr_path,
+            f"{provider.name}:bridges",
+        )
+        if agent_bridges_path.exists() and agent_bridges_path != bridges_path:
+            copy_file_atomically(agent_bridges_path, bridges_path)
+    finally:
+        if isolated_workdir is not None:
+            cleanup_isolated_workdir(args, isolated_workdir)
 
     if returncode == 0 and bridges_path.exists():
         validate_bridges_json(bridges_path)
@@ -582,6 +778,10 @@ def run_bridges_once(args: argparse.Namespace, template: str) -> BridgesResult:
         "discovery_dir": str(args.discovery_dir),
         "combined_path": str(combined_path),
         "bridges_path": str(bridges_path),
+        "agent_isolated": not args.no_isolate_agent_workdir,
+        "agent_visible_roots": ["agent-input", "agent-output"]
+        if not args.no_isolate_agent_workdir
+        else ["repo_root"],
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
         "returncode": returncode,
@@ -643,6 +843,10 @@ def bangers_path(args: argparse.Namespace, combined_index: int) -> Path:
     return args.bangers_dir / f"banger_{combined_index}.json"
 
 
+def agent_bangers_path(agent_workdir: Path, combined_index: int) -> Path:
+    return agent_workdir / "agent-output" / f"banger_{combined_index}.json"
+
+
 def validate_bangers_json(path: Path) -> None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -672,24 +876,36 @@ def print_bangers_dry_run(
     input_index: int,
     input_element: dict[str, Any],
 ) -> None:
-    provider = build_provider_command(args, args.repo_root)
     output_path = bangers_path(args, input_index)
+    isolated_workdir: Path | None = None
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_output_path = output_path
+    else:
+        agent_workdir = create_isolated_workdir(args, f"bangers-{input_index}")
+        isolated_workdir = agent_workdir
+        agent_output_path = agent_bangers_path(agent_workdir, input_index)
+
+    provider = build_provider_command(args, agent_workdir)
     prompt = render_bangers_prompt(
         template,
         input_element,
-        output_path,
+        agent_output_path,
         provider.name,
     )
     print(f"\n--- banger input {input_index} ---")
     print(f"banger input path: {banger_inputs_path(args)}")
     print(f"input type: {input_element.get('type', 'goal')}")
     print(f"bangers path: {output_path}")
-    print(f"agent workdir: {args.repo_root}")
+    print(f"agent workdir: {agent_workdir}")
+    print(f"agent bangers path: {agent_output_path}")
     print(f"{provider.name} command:", " ".join(provider.command))
     if args.print_prompt:
         print(prompt)
     else:
         print(prompt[:1200] + ("..." if len(prompt) > 1200 else ""))
+    if isolated_workdir is not None:
+        cleanup_isolated_workdir(args, isolated_workdir)
 
 
 def banger_batch_log_stem(input_indexes: list[int]) -> str:
@@ -711,11 +927,16 @@ def banger_batches(
 def banger_batch_prompt_elements(
     args: argparse.Namespace,
     batch: list[tuple[int, dict[str, Any]]],
+    output_paths: dict[int, Path] | None = None,
 ) -> list[dict[str, Any]]:
     return [
         {
             "input_index": input_index,
-            "output_path": str(bangers_path(args, input_index)),
+            "output_path": str(
+                output_paths[input_index]
+                if output_paths is not None
+                else bangers_path(args, input_index)
+            ),
             "input": input_element,
         }
         for input_index, input_element in batch
@@ -727,11 +948,31 @@ def print_bangers_batch_dry_run(
     template: str,
     batch: list[tuple[int, dict[str, Any]]],
 ) -> None:
-    provider = build_provider_command(args, args.repo_root)
     input_indexes = [input_index for input_index, _ in batch]
+    isolated_workdir: Path | None = None
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_output_paths = {
+            input_index: bangers_path(args, input_index)
+            for input_index in input_indexes
+        }
+    else:
+        label = (
+            f"bangers-{input_indexes[0]}"
+            if len(input_indexes) == 1
+            else f"bangers-{input_indexes[0]}-{input_indexes[-1]}"
+        )
+        agent_workdir = create_isolated_workdir(args, label)
+        isolated_workdir = agent_workdir
+        agent_output_paths = {
+            input_index: agent_bangers_path(agent_workdir, input_index)
+            for input_index in input_indexes
+        }
+
+    provider = build_provider_command(args, agent_workdir)
     prompt = render_bangers_batch_prompt(
         template,
-        banger_batch_prompt_elements(args, batch),
+        banger_batch_prompt_elements(args, batch, agent_output_paths),
         provider.name,
     )
     print(f"\n--- banger inputs {input_indexes[0]}-{input_indexes[-1]} ---")
@@ -740,12 +981,17 @@ def print_bangers_batch_dry_run(
     print("bangers paths:")
     for input_index in input_indexes:
         print(f"  {bangers_path(args, input_index)}")
-    print(f"agent workdir: {args.repo_root}")
+    print("agent bangers paths:")
+    for input_index in input_indexes:
+        print(f"  {agent_output_paths[input_index]}")
+    print(f"agent workdir: {agent_workdir}")
     print(f"{provider.name} command:", " ".join(provider.command))
     if args.print_prompt:
         print(prompt)
     else:
         print(prompt[:1200] + ("..." if len(prompt) > 1200 else ""))
+    if isolated_workdir is not None:
+        cleanup_isolated_workdir(args, isolated_workdir)
 
 
 def run_bangers_once(
@@ -754,28 +1000,43 @@ def run_bangers_once(
     input_index: int,
     input_element: dict[str, Any],
 ) -> BangersResult:
-    provider = build_provider_command(args, args.repo_root)
     output_path = bangers_path(args, input_index)
+    isolated_workdir: Path | None = None
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_output_path = output_path
+    else:
+        agent_workdir = create_isolated_workdir(args, f"bangers-{input_index}")
+        isolated_workdir = agent_workdir
+        agent_output_path = agent_bangers_path(agent_workdir, input_index)
+
+    provider = build_provider_command(args, agent_workdir)
     stdout_path = args.bangers_dir / f"banger_{input_index}.{provider.name}.stdout.log"
     stderr_path = args.bangers_dir / f"banger_{input_index}.{provider.name}.stderr.log"
     prompt = render_bangers_prompt(
         template,
         input_element,
-        output_path,
+        agent_output_path,
         provider.name,
     )
     started_at = datetime.now(timezone.utc).isoformat()
 
     print(f"bangers input {input_index} -> {output_path}", file=sys.stderr)
     print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    returncode = run_command(
-        provider.command,
-        args.repo_root,
-        prompt,
-        stdout_path,
-        stderr_path,
-        f"{provider.name}:bangers:{input_index}",
-    )
+    try:
+        returncode = run_command(
+            provider.command,
+            agent_workdir,
+            prompt,
+            stdout_path,
+            stderr_path,
+            f"{provider.name}:bangers:{input_index}",
+        )
+        if agent_output_path.exists() and agent_output_path != output_path:
+            copy_file_atomically(agent_output_path, output_path)
+    finally:
+        if isolated_workdir is not None:
+            cleanup_isolated_workdir(args, isolated_workdir)
 
     if returncode == 0 and output_path.exists():
         validate_bangers_json(output_path)
@@ -793,6 +1054,10 @@ def run_bangers_once(
         "source_index": input_element.get("source_index", input_index),
         "combined_index": input_index,
         "bangers_path": str(output_path),
+        "agent_isolated": not args.no_isolate_agent_workdir,
+        "agent_visible_roots": ["logs-indexed", "agent-output"]
+        if not args.no_isolate_agent_workdir
+        else ["repo_root"],
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
         "returncode": returncode,
@@ -817,33 +1082,60 @@ def run_bangers_batch_once(
     template: str,
     batch: list[tuple[int, dict[str, Any]]],
 ) -> BangersBatchResult:
-    provider = build_provider_command(args, args.repo_root)
     input_indexes = [input_index for input_index, _ in batch]
     output_paths = [bangers_path(args, input_index) for input_index in input_indexes]
+    if len(input_indexes) == 1:
+        label = str(input_indexes[0])
+        workdir_label = f"bangers-{input_indexes[0]}"
+    else:
+        label = f"{input_indexes[0]}-{input_indexes[-1]}"
+        workdir_label = f"bangers-{input_indexes[0]}-{input_indexes[-1]}"
+
+    isolated_workdir: Path | None = None
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_output_paths = {
+            input_index: bangers_path(args, input_index)
+            for input_index in input_indexes
+        }
+    else:
+        agent_workdir = create_isolated_workdir(args, workdir_label)
+        isolated_workdir = agent_workdir
+        agent_output_paths = {
+            input_index: agent_bangers_path(agent_workdir, input_index)
+            for input_index in input_indexes
+        }
+
+    provider = build_provider_command(args, agent_workdir)
     log_stem = banger_batch_log_stem(input_indexes)
     stdout_path = args.bangers_dir / f"{log_stem}.{provider.name}.stdout.log"
     stderr_path = args.bangers_dir / f"{log_stem}.{provider.name}.stderr.log"
     prompt = render_bangers_batch_prompt(
         template,
-        banger_batch_prompt_elements(args, batch),
+        banger_batch_prompt_elements(args, batch, agent_output_paths),
         provider.name,
     )
     started_at = datetime.now(timezone.utc).isoformat()
 
-    if len(input_indexes) == 1:
-        label = str(input_indexes[0])
-    else:
-        label = f"{input_indexes[0]}-{input_indexes[-1]}"
     print(f"bangers inputs {label} -> {args.bangers_dir}", file=sys.stderr)
     print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    returncode = run_command(
-        provider.command,
-        args.repo_root,
-        prompt,
-        stdout_path,
-        stderr_path,
-        f"{provider.name}:bangers:{label}",
-    )
+    try:
+        returncode = run_command(
+            provider.command,
+            agent_workdir,
+            prompt,
+            stdout_path,
+            stderr_path,
+            f"{provider.name}:bangers:{label}",
+        )
+        for input_index in input_indexes:
+            agent_output_path = agent_output_paths[input_index]
+            output_path = bangers_path(args, input_index)
+            if agent_output_path.exists() and agent_output_path != output_path:
+                copy_file_atomically(agent_output_path, output_path)
+    finally:
+        if isolated_workdir is not None:
+            cleanup_isolated_workdir(args, isolated_workdir)
 
     missing_paths = [path for path in output_paths if not path.exists()]
     if returncode == 0:
@@ -870,6 +1162,10 @@ def run_bangers_batch_once(
         ],
         "combined_indexes": input_indexes,
         "bangers_paths": [str(path) for path in output_paths],
+        "agent_isolated": not args.no_isolate_agent_workdir,
+        "agent_visible_roots": ["logs-indexed", "agent-output"]
+        if not args.no_isolate_agent_workdir
+        else ["repo_root"],
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
         "returncode": returncode,
@@ -1005,6 +1301,78 @@ def questions_path(args: argparse.Namespace, suggestion: dict[str, Any]) -> Path
     return args.questions_dir / f"question_{suggestion['_question_id']}.json"
 
 
+def agent_questions_path(agent_workdir: Path, suggestion: dict[str, Any]) -> Path:
+    return agent_workdir / "agent-output" / f"question_{suggestion['_question_id']}.json"
+
+
+def question_context_for_suggestion(
+    indexed_events: list[dict[str, Any]],
+    suggestion: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return context_events_for_timestamp(
+        indexed_events,
+        suggestion.get("timestamp"),
+        QUESTION_CONTEXT_EVENT_COUNT,
+    )
+
+
+def suggestion_title(suggestion: dict[str, Any]) -> str:
+    for key in ("title", "suggestion", "action", "expected_artifact", "goal"):
+        value = suggestion.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return str(suggestion.get("_question_id", ""))
+
+
+def attach_question_context(
+    data: dict[str, Any],
+    suggestion: dict[str, Any],
+    context_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    output = dict(data)
+    output["suggestion_title"] = (
+        output.get("suggestion_title")
+        if isinstance(output.get("suggestion_title"), str)
+        and output.get("suggestion_title")
+        else suggestion_title(suggestion)
+    )
+    output["banger_timestamp"] = suggestion.get("timestamp")
+    output["context_events"] = context_events
+    return output
+
+
+def write_json_atomically(path: Path, data: Any) -> None:
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
+    try:
+        tmp.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def normalize_questions_file(
+    path: Path,
+    suggestion: dict[str, Any],
+    context_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"questions output is not valid JSON: {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"questions output must be a JSON object: {path}")
+
+    normalized = attach_question_context(data, suggestion, context_events)
+    validate_questions_data(normalized, path)
+    if normalized != data:
+        write_json_atomically(path, normalized)
+    return normalized
+
+
 def banger_files(bangers_dir: Path) -> list[tuple[int, Path]]:
     files: list[tuple[int, Path]] = []
     for path in sorted(bangers_dir.glob("banger_*.json")):
@@ -1064,34 +1432,64 @@ def print_questions_dry_run(
     args: argparse.Namespace,
     template: str,
     suggestion: dict[str, Any],
+    indexed_events: list[dict[str, Any]],
 ) -> None:
-    provider = build_provider_command(args, args.repo_root)
     output_path = questions_path(args, suggestion)
+    context_events = question_context_for_suggestion(indexed_events, suggestion)
+    isolated_workdir: Path | None = None
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_output_path = output_path
+    else:
+        agent_workdir = create_isolated_workdir(
+            args,
+            f"questions-{suggestion['_question_id']}",
+        )
+        isolated_workdir = agent_workdir
+        agent_output_path = agent_questions_path(agent_workdir, suggestion)
+
+    provider = build_provider_command(args, agent_workdir)
     prompt = render_questions_prompt(
         template,
         suggestion,
-        output_path,
+        context_events,
+        agent_output_path,
         provider.name,
     )
     print(f"\n--- suggestion {suggestion['_question_id']} ---")
     print(f"bangers path: {suggestion['_source_bangers_path']}")
     print(f"questions path: {output_path}")
-    print(f"agent workdir: {args.repo_root}")
+    print(f"context events: {len(context_events)}")
+    print(f"agent questions path: {agent_output_path}")
+    print(f"agent workdir: {agent_workdir}")
     print(f"{provider.name} command:", " ".join(provider.command))
     if args.print_prompt:
         print(prompt)
     else:
         print(prompt[:1200] + ("..." if len(prompt) > 1200 else ""))
+    if isolated_workdir is not None:
+        cleanup_isolated_workdir(args, isolated_workdir)
 
 
 def run_questions_once(
     args: argparse.Namespace,
     template: str,
     suggestion: dict[str, Any],
+    indexed_events: list[dict[str, Any]],
 ) -> QuestionsResult:
-    provider = build_provider_command(args, args.repo_root)
     suggestion_index = suggestion["_question_id"]
     output_path = questions_path(args, suggestion)
+    context_events = question_context_for_suggestion(indexed_events, suggestion)
+    isolated_workdir: Path | None = None
+    if args.no_isolate_agent_workdir:
+        agent_workdir = args.repo_root
+        agent_output_path = output_path
+    else:
+        agent_workdir = create_isolated_workdir(args, f"questions-{suggestion_index}")
+        isolated_workdir = agent_workdir
+        agent_output_path = agent_questions_path(agent_workdir, suggestion)
+
+    provider = build_provider_command(args, agent_workdir)
     stdout_path = args.questions_dir / (
         f"question_{suggestion_index}.{provider.name}.stdout.log"
     )
@@ -1101,24 +1499,31 @@ def run_questions_once(
     prompt = render_questions_prompt(
         template,
         suggestion,
-        output_path,
+        context_events,
+        agent_output_path,
         provider.name,
     )
     started_at = datetime.now(timezone.utc).isoformat()
 
     print(f"questions suggestion {suggestion_index} -> {output_path}", file=sys.stderr)
     print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    returncode = run_command(
-        provider.command,
-        args.repo_root,
-        prompt,
-        stdout_path,
-        stderr_path,
-        f"{provider.name}:questions:{suggestion_index}",
-    )
+    try:
+        returncode = run_command(
+            provider.command,
+            agent_workdir,
+            prompt,
+            stdout_path,
+            stderr_path,
+            f"{provider.name}:questions:{suggestion_index}",
+        )
+        if agent_output_path.exists() and agent_output_path != output_path:
+            copy_file_atomically(agent_output_path, output_path)
+    finally:
+        if isolated_workdir is not None:
+            cleanup_isolated_workdir(args, isolated_workdir)
 
     if returncode == 0 and output_path.exists():
-        validate_questions_json(output_path)
+        normalize_questions_file(output_path, suggestion, context_events)
 
     completed_at = datetime.now(timezone.utc).isoformat()
     record = {
@@ -1132,7 +1537,12 @@ def run_questions_once(
         "combined_index": suggestion["_combined_index"],
         "goal_index": suggestion["_goal_index"],
         "opportunity_index": suggestion["_opportunity_index"],
+        "question_context_event_count": len(context_events),
         "questions_path": str(output_path),
+        "agent_isolated": not args.no_isolate_agent_workdir,
+        "agent_visible_roots": ["logs-indexed", "agent-output"]
+        if not args.no_isolate_agent_workdir
+        else ["repo_root"],
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
         "returncode": returncode,
@@ -1155,19 +1565,23 @@ def run_questions_once(
 def write_final_questions(
     args: argparse.Namespace,
     suggestions: list[dict[str, Any]],
+    indexed_events: list[dict[str, Any]],
 ) -> None:
     final_items: list[dict[str, Any]] = []
     for suggestion in suggestions:
         path = questions_path(args, suggestion)
         if not path.exists():
             continue
-        data = json.loads(path.read_text(encoding="utf-8"))
+        context_events = question_context_for_suggestion(indexed_events, suggestion)
+        data = normalize_questions_file(path, suggestion, context_events)
         final_items.append(
             {
                 "question_id": suggestion["_question_id"],
                 "combined_index": suggestion["_combined_index"],
                 "goal_index": suggestion["_goal_index"],
                 "opportunity_index": suggestion["_opportunity_index"],
+                "banger_timestamp": data.get("banger_timestamp"),
+                "context_events": data.get("context_events"),
                 "suggestion": suggestion,
                 "questions": data,
             }
@@ -1184,43 +1598,57 @@ def run_questions(args: argparse.Namespace) -> int:
     if not args.repo_root.exists():
         raise SystemExit(f"repo root not found: {args.repo_root}")
 
-    template = load_template(args.template, ("{suggestion_json}",))
+    template = load_template(args.template, ("{suggestion_json}", "{context_events_json}"))
     selected = load_suggestions_from_bangers(args)
     if not selected:
         print("no banger opportunities selected", file=sys.stderr)
         return 0
+    indexed_events = load_indexed_events(args.repo_root / "logs-indexed")
+    if not indexed_events:
+        raise SystemExit(f"no timestamped events found in {args.repo_root / 'logs-indexed'}")
 
     print(f"selected banger opportunities: {len(selected)}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
     print(f"jobs: {args.jobs}", file=sys.stderr)
+    print(
+        f"question context events per suggestion: {QUESTION_CONTEXT_EVENT_COUNT}",
+        file=sys.stderr,
+    )
 
     selected_to_run: list[dict[str, Any]] = []
     for suggestion in selected:
         output_path = questions_path(args, suggestion)
         if output_path.exists() and not args.force:
+            context_events = question_context_for_suggestion(indexed_events, suggestion)
+            if not args.dry_run:
+                normalize_questions_file(output_path, suggestion, context_events)
             print(
                 f"skip suggestion {suggestion['_question_id']}: {output_path} exists",
                 file=sys.stderr,
             )
             continue
         if args.dry_run:
-            print_questions_dry_run(args, template, suggestion)
+            print_questions_dry_run(args, template, suggestion, indexed_events)
         else:
             selected_to_run.append(suggestion)
 
     if args.dry_run:
         return 0
     if not selected_to_run:
-        write_final_questions(args, selected)
+        write_final_questions(args, selected, indexed_events)
         return 0
 
     args.questions_dir.mkdir(parents=True, exist_ok=True)
     failures = 0
     with ThreadPoolExecutor(max_workers=args.jobs) as executor:
         future_to_index = {
-            executor.submit(run_questions_once, args, template, suggestion): suggestion[
-                "_question_id"
-            ]
+            executor.submit(
+                run_questions_once,
+                args,
+                template,
+                suggestion,
+                indexed_events,
+            ): suggestion["_question_id"]
             for suggestion in selected_to_run
         }
         for future in as_completed(future_to_index):
@@ -1266,7 +1694,7 @@ def run_questions(args: argparse.Namespace) -> int:
 
     if failures:
         return 1
-    write_final_questions(args, selected)
+    write_final_questions(args, selected, indexed_events)
     return 0
 
 
@@ -1290,7 +1718,7 @@ def run_discovery(args: argparse.Namespace) -> int:
     if not args.no_isolate_agent_workdir:
         print(
             "agent isolation: enabled; child workdirs contain only logs-indexed "
-            "and an empty agent-output directory",
+            "and an empty agent-output directory for this stage",
             file=sys.stderr,
         )
 

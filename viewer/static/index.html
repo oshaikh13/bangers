@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Discovery Viewer</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1>Discovery Viewer</h1>
+        <p class="subtitle">Browse goals, combined, bangers, and questions</p>
+      </div>
+      <div class="topbar-right">
+        <label for="run-select">Run</label>
+        <select id="run-select"></select>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="goals" role="tab">Goals</button>
+      <button class="tab" data-tab="combined" role="tab">Combined</button>
+      <button class="tab" data-tab="bangers" role="tab">Bangers</button>
+      <button class="tab" data-tab="questions" role="tab">Questions</button>
+    </nav>
+
+    <main id="layout" class="layout">
+      <aside id="list-pane" class="list-pane">
+        <div class="pane-toolbar">
+          <div id="list-header" class="list-header"></div>
+          <button id="toggle-list-pane" class="pane-toggle" type="button" aria-label="Collapse list panel">
+            ‹
+          </button>
+        </div>
+        <ul id="item-list" class="item-list"></ul>
+      </aside>
+      <div id="layout-resizer" class="layout-resizer" aria-hidden="true"></div>
+      <section id="detail-pane" class="detail-pane">
+        <div class="pane-toolbar detail-toolbar">
+          <button id="toggle-detail-pane" class="pane-toggle" type="button" aria-label="Collapse detail panel">
+            ›
+          </button>
+          <div id="detail-header" class="detail-header"></div>
+        </div>
+        <div id="detail-content" class="detail-content">
+          <p class="empty-state">Select an item to view details.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

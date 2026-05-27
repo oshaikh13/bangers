@@ -152,8 +152,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-isolate-agent-workdir",
         action="store_true",
         help=(
-            "Run the agent in the real repo. By default each run sees only a "
-            "temporary copy of logs-indexed and an empty output directory."
+            "Run the agent in the real repo. By default each run uses a "
+            "temporary workdir with only the stage inputs it needs; stages "
+            "that inspect logs see logs-indexed and an empty output directory."
         ),
     )
     parser.add_argument(
@@ -179,7 +180,6 @@ def build_parser() -> argparse.ArgumentParser:
             "Use 0 to let tqdm choose."
         ),
     )
-
     add_codex_args(parser)
     add_claude_args(parser)
     return parser
@@ -241,9 +241,12 @@ def add_claude_args(parser: argparse.ArgumentParser) -> None:
     )
     group.add_argument(
         "--claude-permission-mode",
-        default="acceptEdits",
+        default="auto",
         choices=("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"),
-        help="Permission mode for Claude. acceptEdits lets Claude write output files.",
+        help=(
+            "Permission mode for Claude. auto lets Claude run Bash, Read, and "
+            "Write unattended so it can explore logs and write output files."
+        ),
     )
     group.add_argument(
         "--claude-output-format",
