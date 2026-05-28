@@ -145,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help=(
             "With --bangers, number of 02c suggestion inputs to include in each "
-            "agent run. Defaults to 1 for one output file per run."
+            "agent run. Defaults to 1 for one range-named output file per run."
         ),
     )
     parser.add_argument(

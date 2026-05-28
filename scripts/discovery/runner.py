@@ -847,14 +847,19 @@ def agent_bangers_path(agent_workdir: Path, combined_index: int) -> Path:
     return agent_workdir / "agent-output" / f"banger_{combined_index}.json"
 
 
-def validate_bangers_json(path: Path) -> None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"bangers output is not valid JSON: {path}: {exc}") from exc
-    if not isinstance(data, dict):
-        raise RuntimeError(f"bangers output must be a JSON object: {path}")
-    goals = data.get("goals")
+def bangers_batch_path(args: argparse.Namespace, input_indexes: list[int]) -> Path:
+    return args.bangers_dir / f"bangers_{input_indexes[0]}_{input_indexes[-1]}.json"
+
+
+def agent_bangers_batch_path(agent_workdir: Path, input_indexes: list[int]) -> Path:
+    return (
+        agent_workdir
+        / "agent-output"
+        / f"bangers_{input_indexes[0]}_{input_indexes[-1]}.json"
+    )
+
+
+def validate_banger_goals(goals: Any, path: Path) -> None:
     if not isinstance(goals, list):
         raise RuntimeError(f"bangers output goals must be an array: {path}")
     for goal_index, goal in enumerate(goals):
@@ -868,6 +873,67 @@ def validate_bangers_json(path: Path) -> None:
                 f"bangers output goals[{goal_index}].opportunities must be "
                 f"an array: {path}"
             )
+
+
+def validate_bangers_json(path: Path) -> None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"bangers output is not valid JSON: {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"bangers output must be a JSON object: {path}")
+    if "bangers" in data:
+        bangers = data.get("bangers")
+        if not isinstance(bangers, list):
+            raise RuntimeError(f"bangers output bangers must be an array: {path}")
+        for item_index, item in enumerate(bangers):
+            if not isinstance(item, dict):
+                raise RuntimeError(
+                    f"bangers output bangers[{item_index}] must be an object: {path}"
+                )
+            if not isinstance(item.get("input_index"), int):
+                raise RuntimeError(
+                    f"bangers output bangers[{item_index}].input_index must be "
+                    f"an integer: {path}"
+                )
+            validate_banger_goals(item.get("goals"), path)
+    else:
+        validate_banger_goals(data.get("goals"), path)
+
+
+def split_bangers_batch_json(path: Path) -> list[tuple[int, dict[str, Any]]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"bangers input is not valid JSON: {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"bangers input must be a JSON object: {path}")
+    if "bangers" not in data:
+        try:
+            combined_index = int(path.stem[len("banger_") :])
+        except ValueError as exc:
+            raise RuntimeError(
+                f"legacy banger file is missing numeric index: {path}"
+            ) from exc
+        return [(combined_index, data)]
+
+    bangers = data.get("bangers")
+    if not isinstance(bangers, list):
+        raise RuntimeError(f"bangers input bangers must be an array: {path}")
+    items: list[tuple[int, dict[str, Any]]] = []
+    for item_index, item in enumerate(bangers):
+        if not isinstance(item, dict):
+            raise RuntimeError(
+                f"bangers input bangers[{item_index}] must be an object: {path}"
+            )
+        input_index = item.get("input_index")
+        if not isinstance(input_index, int):
+            raise RuntimeError(
+                f"bangers input bangers[{item_index}].input_index must be "
+                f"an integer: {path}"
+            )
+        items.append((input_index, item))
+    return items
 
 
 def print_bangers_dry_run(
@@ -925,18 +991,11 @@ def banger_batches(
 
 
 def banger_batch_prompt_elements(
-    args: argparse.Namespace,
     batch: list[tuple[int, dict[str, Any]]],
-    output_paths: dict[int, Path] | None = None,
 ) -> list[dict[str, Any]]:
     return [
         {
             "input_index": input_index,
-            "output_path": str(
-                output_paths[input_index]
-                if output_paths is not None
-                else bangers_path(args, input_index)
-            ),
             "input": input_element,
         }
         for input_index, input_element in batch
@@ -949,13 +1008,11 @@ def print_bangers_batch_dry_run(
     batch: list[tuple[int, dict[str, Any]]],
 ) -> None:
     input_indexes = [input_index for input_index, _ in batch]
+    output_path = bangers_batch_path(args, input_indexes)
     isolated_workdir: Path | None = None
     if args.no_isolate_agent_workdir:
         agent_workdir = args.repo_root
-        agent_output_paths = {
-            input_index: bangers_path(args, input_index)
-            for input_index in input_indexes
-        }
+        agent_output_path = output_path
     else:
         label = (
             f"bangers-{input_indexes[0]}"
@@ -964,26 +1021,22 @@ def print_bangers_batch_dry_run(
         )
         agent_workdir = create_isolated_workdir(args, label)
         isolated_workdir = agent_workdir
-        agent_output_paths = {
-            input_index: agent_bangers_path(agent_workdir, input_index)
-            for input_index in input_indexes
-        }
+        agent_output_path = agent_bangers_batch_path(agent_workdir, input_indexes)
 
     provider = build_provider_command(args, agent_workdir)
     prompt = render_bangers_batch_prompt(
         template,
-        banger_batch_prompt_elements(args, batch, agent_output_paths),
+        {
+            "output_path": str(agent_output_path),
+            "items": banger_batch_prompt_elements(batch),
+        },
         provider.name,
     )
     print(f"\n--- banger inputs {input_indexes[0]}-{input_indexes[-1]} ---")
     print(f"banger input path: {banger_inputs_path(args)}")
     print(f"batch size: {len(batch)}")
-    print("bangers paths:")
-    for input_index in input_indexes:
-        print(f"  {bangers_path(args, input_index)}")
-    print("agent bangers paths:")
-    for input_index in input_indexes:
-        print(f"  {agent_output_paths[input_index]}")
+    print(f"bangers path: {output_path}")
+    print(f"agent bangers path: {agent_output_path}")
     print(f"agent workdir: {agent_workdir}")
     print(f"{provider.name} command:", " ".join(provider.command))
     if args.print_prompt:
@@ -1083,7 +1136,7 @@ def run_bangers_batch_once(
     batch: list[tuple[int, dict[str, Any]]],
 ) -> BangersBatchResult:
     input_indexes = [input_index for input_index, _ in batch]
-    output_paths = [bangers_path(args, input_index) for input_index in input_indexes]
+    output_path = bangers_batch_path(args, input_indexes)
     if len(input_indexes) == 1:
         label = str(input_indexes[0])
         workdir_label = f"bangers-{input_indexes[0]}"
@@ -1094,17 +1147,11 @@ def run_bangers_batch_once(
     isolated_workdir: Path | None = None
     if args.no_isolate_agent_workdir:
         agent_workdir = args.repo_root
-        agent_output_paths = {
-            input_index: bangers_path(args, input_index)
-            for input_index in input_indexes
-        }
+        agent_output_path = output_path
     else:
         agent_workdir = create_isolated_workdir(args, workdir_label)
         isolated_workdir = agent_workdir
-        agent_output_paths = {
-            input_index: agent_bangers_path(agent_workdir, input_index)
-            for input_index in input_indexes
-        }
+        agent_output_path = agent_bangers_batch_path(agent_workdir, input_indexes)
 
     provider = build_provider_command(args, agent_workdir)
     log_stem = banger_batch_log_stem(input_indexes)
@@ -1112,7 +1159,10 @@ def run_bangers_batch_once(
     stderr_path = args.bangers_dir / f"{log_stem}.{provider.name}.stderr.log"
     prompt = render_bangers_batch_prompt(
         template,
-        banger_batch_prompt_elements(args, batch, agent_output_paths),
+        {
+            "output_path": str(agent_output_path),
+            "items": banger_batch_prompt_elements(batch),
+        },
         provider.name,
     )
     started_at = datetime.now(timezone.utc).isoformat()
@@ -1128,20 +1178,15 @@ def run_bangers_batch_once(
             stderr_path,
             f"{provider.name}:bangers:{label}",
         )
-        for input_index in input_indexes:
-            agent_output_path = agent_output_paths[input_index]
-            output_path = bangers_path(args, input_index)
-            if agent_output_path.exists() and agent_output_path != output_path:
-                copy_file_atomically(agent_output_path, output_path)
+        if agent_output_path.exists() and agent_output_path != output_path:
+            copy_file_atomically(agent_output_path, output_path)
     finally:
         if isolated_workdir is not None:
             cleanup_isolated_workdir(args, isolated_workdir)
 
-    missing_paths = [path for path in output_paths if not path.exists()]
-    if returncode == 0:
-        for output_path in output_paths:
-            if output_path.exists():
-                validate_bangers_json(output_path)
+    missing_paths = [] if output_path.exists() else [output_path]
+    if returncode == 0 and output_path.exists():
+        validate_bangers_json(output_path)
 
     completed_at = datetime.now(timezone.utc).isoformat()
     record = {
@@ -1161,7 +1206,8 @@ def run_bangers_batch_once(
             for input_index, input_element in batch
         ],
         "combined_indexes": input_indexes,
-        "bangers_paths": [str(path) for path in output_paths],
+        "bangers_path": str(output_path),
+        "bangers_paths": [str(output_path)],
         "agent_isolated": not args.no_isolate_agent_workdir,
         "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
@@ -1179,7 +1225,7 @@ def run_bangers_batch_once(
     return BangersBatchResult(
         input_indexes=input_indexes,
         record=record,
-        bangers_paths=output_paths,
+        bangers_paths=[output_path],
         stderr_path=stderr_path,
         returncode=returncode,
         missing_paths=missing_paths,
@@ -1215,20 +1261,19 @@ def run_bangers(args: argparse.Namespace) -> int:
     print(f"jobs: {args.jobs}", file=sys.stderr)
     print(f"banger batch size: {args.banger_batch_size}", file=sys.stderr)
 
-    selected_to_run: list[tuple[int, dict[str, Any]]] = []
-    for combined_index, combined_element in selected:
-        output_path = bangers_path(args, combined_index)
+    batches = banger_batches(selected, args.banger_batch_size)
+    selected_to_run: list[list[tuple[int, dict[str, Any]]]] = []
+    for batch in batches:
+        input_indexes = [input_index for input_index, _ in batch]
+        output_path = bangers_batch_path(args, input_indexes)
         if output_path.exists() and not args.force:
-            print(
-                f"skip banger input {combined_index}: {output_path} exists",
-                file=sys.stderr,
-            )
+            label = f"{input_indexes[0]}-{input_indexes[-1]}"
+            print(f"skip banger inputs {label}: {output_path} exists", file=sys.stderr)
             continue
-        selected_to_run.append((combined_index, combined_element))
+        selected_to_run.append(batch)
 
-    batches = banger_batches(selected_to_run, args.banger_batch_size)
     if args.dry_run:
-        for batch in batches:
+        for batch in selected_to_run:
             print_bangers_batch_dry_run(args, template, batch)
         return 0
 
@@ -1245,7 +1290,7 @@ def run_bangers(args: argparse.Namespace) -> int:
                 template,
                 batch,
             ): [input_index for input_index, _ in batch]
-            for batch in batches
+            for batch in selected_to_run
         }
         for future in as_completed(future_to_index):
             input_indexes = future_to_index[future]
@@ -1373,15 +1418,14 @@ def normalize_questions_file(
     return normalized
 
 
-def banger_files(bangers_dir: Path) -> list[tuple[int, Path]]:
-    files: list[tuple[int, Path]] = []
-    for path in sorted(bangers_dir.glob("banger_*.json")):
-        try:
-            combined_index = int(path.stem[len("banger_") :])
-        except ValueError:
-            continue
-        files.append((combined_index, path))
-    return files
+def banger_files(bangers_dir: Path) -> list[Path]:
+    return sorted(
+        [
+            path
+            for pattern in ("bangers_*.json", "banger_*.json")
+            for path in bangers_dir.glob(pattern)
+        ]
+    )
 
 
 def load_suggestions_from_bangers(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -1390,37 +1434,32 @@ def load_suggestions_from_bangers(args: argparse.Namespace) -> list[dict[str, An
 
     parsed_indexes = parse_interval_indexes(args.combined_indexes)
     suggestions: list[dict[str, Any]] = []
-    for combined_index, path in banger_files(args.bangers_dir):
-        if parsed_indexes is not None and combined_index not in parsed_indexes:
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"bangers input is not valid JSON: {path}: {exc}") from exc
-        if not isinstance(data, dict):
-            raise RuntimeError(f"bangers input must be a JSON object: {path}")
-        goals = data.get("goals")
-        if not isinstance(goals, list):
-            raise RuntimeError(f"bangers input goals must be an array: {path}")
-        for goal_index, goal in enumerate(goals):
-            if not isinstance(goal, dict):
+    for path in banger_files(args.bangers_dir):
+        for combined_index, data in split_bangers_batch_json(path):
+            if parsed_indexes is not None and combined_index not in parsed_indexes:
                 continue
-            opportunities = goal.get("opportunities")
-            if not isinstance(opportunities, list):
-                continue
-            for opportunity_index, opportunity in enumerate(opportunities):
-                if not isinstance(opportunity, dict):
+            goals = data.get("goals")
+            if not isinstance(goals, list):
+                raise RuntimeError(f"bangers input goals must be an array: {path}")
+            for goal_index, goal in enumerate(goals):
+                if not isinstance(goal, dict):
                     continue
-                suggestion = dict(opportunity)
-                suggestion["goal"] = goal.get("goal")
-                suggestion["_source_bangers_path"] = str(path)
-                suggestion["_combined_index"] = combined_index
-                suggestion["_goal_index"] = goal_index
-                suggestion["_opportunity_index"] = opportunity_index
-                suggestion["_question_id"] = (
-                    f"{combined_index}_{goal_index}_{opportunity_index}"
-                )
-                suggestions.append(suggestion)
+                opportunities = goal.get("opportunities")
+                if not isinstance(opportunities, list):
+                    continue
+                for opportunity_index, opportunity in enumerate(opportunities):
+                    if not isinstance(opportunity, dict):
+                        continue
+                    suggestion = dict(opportunity)
+                    suggestion["goal"] = goal.get("goal")
+                    suggestion["_source_bangers_path"] = str(path)
+                    suggestion["_combined_index"] = combined_index
+                    suggestion["_goal_index"] = goal_index
+                    suggestion["_opportunity_index"] = opportunity_index
+                    suggestion["_question_id"] = (
+                        f"{combined_index}_{goal_index}_{opportunity_index}"
+                    )
+                    suggestions.append(suggestion)
 
     selected = suggestions[args.start:]
     if args.limit is not None:

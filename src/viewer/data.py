@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 GOAL_PATTERN = re.compile(r"^goal_(\d+)\.json$")
 BANGER_PATTERN = re.compile(r"^banger_(\d+)\.json$")
+BANGERS_PATTERN = re.compile(r"^bangers_(\d+)_(\d+)\.json$")
 QUESTION_PATTERN = re.compile(r"^question_(.+)\.json$")
 COMBINED_RELATIVE_PATHS = (
     "02a_combined/combined.json",
@@ -88,7 +89,8 @@ def describe_run(path: Path) -> RunInfo:
         goal_count=goal_count,
         has_goals=goal_count > 0,
         has_combined=resolve_combined_path(path) is not None,
-        has_bangers=any(bangers_dir.glob("banger_*.json")),
+        has_bangers=any(bangers_dir.glob("bangers_*.json"))
+        or any(bangers_dir.glob("banger_*.json")),
         has_questions=final_questions.is_file() or any(
             questions_dir.glob("question_*.json")
         ),
@@ -153,7 +155,25 @@ def load_combined(run_path: Path) -> list[dict[str, Any]]:
 def list_banger_indexes(run_path: Path) -> list[dict[str, Any]]:
     bangers_dir = run_path / "03_bangers"
     indexes: list[dict[str, Any]] = []
-    for path in sorted(bangers_dir.glob("banger_*.json")):
+    paths = sorted(
+        [*bangers_dir.glob("bangers_*.json"), *bangers_dir.glob("banger_*.json")]
+    )
+    for path in paths:
+        batch_match = BANGERS_PATTERN.match(path.name)
+        if batch_match:
+            data = load_json(path)
+            bangers = data.get("bangers") if isinstance(data, dict) else None
+            if not isinstance(bangers, list):
+                continue
+            for item in bangers:
+                if not isinstance(item, dict):
+                    continue
+                combined_index = item.get("input_index")
+                if isinstance(combined_index, int):
+                    indexes.append(
+                        {"combined_index": combined_index, "path": path.name}
+                    )
+            continue
         match = BANGER_PATTERN.match(path.name)
         if not match:
             continue
@@ -164,13 +184,29 @@ def list_banger_indexes(run_path: Path) -> list[dict[str, Any]]:
 
 
 def load_banger(run_path: Path, combined_index: int) -> dict[str, Any]:
-    path = run_path / "03_bangers" / f"banger_{combined_index}.json"
-    if not path.is_file():
-        raise FileNotFoundError(f"banger file not found: banger_{combined_index}.json")
-    data = load_json(path)
-    if not isinstance(data, dict):
-        raise ValueError(f"expected banger object in {path.name}")
-    return data
+    bangers_dir = run_path / "03_bangers"
+    legacy_path = bangers_dir / f"banger_{combined_index}.json"
+    if legacy_path.is_file():
+        data = load_json(legacy_path)
+        if not isinstance(data, dict):
+            raise ValueError(f"expected banger object in {legacy_path.name}")
+        return data
+
+    for path in sorted(bangers_dir.glob("bangers_*.json")):
+        match = BANGERS_PATTERN.match(path.name)
+        if not match:
+            continue
+        start_index, end_index = int(match.group(1)), int(match.group(2))
+        if not start_index <= combined_index <= end_index:
+            continue
+        data = load_json(path)
+        bangers = data.get("bangers") if isinstance(data, dict) else None
+        if not isinstance(bangers, list):
+            raise ValueError(f"expected bangers array in {path.name}")
+        for item in bangers:
+            if isinstance(item, dict) and item.get("input_index") == combined_index:
+                return {"goals": item.get("goals", [])}
+    raise FileNotFoundError(f"banger file not found for input {combined_index}")
 
 
 def list_questions(run_path: Path) -> list[dict[str, Any]]:

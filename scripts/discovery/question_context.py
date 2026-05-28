@@ -105,6 +105,10 @@ def context_events_for_timestamp(
     if limit <= 0:
         raise RuntimeError(f"context event limit must be positive: {limit}")
 
+    # Banger timestamps are rendered to millisecond ISO strings, while indexed
+    # event floats can keep extra microseconds. Include same-millisecond events.
+    cutoff_ts += 0.001
+
     selected = [
         event
         for event in events
