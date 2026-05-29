@@ -7,6 +7,9 @@ from typing import Any, Iterable
 
 
 QUESTION_CONTEXT_EVENT_COUNT = 100
+THREAD_COUNT = 3
+MIN_QAS_PER_THREAD = 3
+MAX_QAS_PER_THREAD = 10
 
 
 def parse_timestamp(value: Any) -> float | None:
@@ -156,23 +159,32 @@ def training_rows_from_final_questions(items: Iterable[Any]) -> list[dict[str, A
         if not isinstance(context_events, list):
             continue
 
-        qa_pairs = questions.get("qa_pairs")
-        if not isinstance(qa_pairs, list):
+        threads = questions.get("threads")
+        if not isinstance(threads, list):
             continue
 
         projected_context = training_context_projection(context_events)
-        for pair in qa_pairs:
-            if not isinstance(pair, dict):
+        for thread in threads:
+            if not isinstance(thread, dict):
                 continue
-            question = pair.get("question")
-            answer = pair.get("answer")
-            if not isinstance(question, str) or not isinstance(answer, str):
+            thread_id = thread.get("thread_id")
+            qa_pairs = thread.get("qa_pairs")
+            if not isinstance(qa_pairs, list):
                 continue
-            rows.append(
-                {
-                    "context_events": projected_context,
-                    "question": question,
-                    "answer": answer,
-                }
-            )
+            for pair in qa_pairs:
+                if not isinstance(pair, dict):
+                    continue
+                question = pair.get("question")
+                answer = pair.get("answer")
+                if not isinstance(question, str) or not isinstance(answer, str):
+                    continue
+                rows.append(
+                    {
+                        "context_events": projected_context,
+                        "thread_id": thread_id,
+                        "q_id": pair.get("q_id"),
+                        "question": question,
+                        "answer": answer,
+                    }
+                )
     return rows

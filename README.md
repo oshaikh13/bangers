@@ -1,11 +1,29 @@
 # Bangers Discovery Data Pipeline
 
-This repo turns passive PowerNap-style activity logs into a final set of execution questions for proactive assistant suggestions.
+This repo turns passive PowerNap-style activity logs into proactive suggestion
+opportunities and the question/answer rows needed to train a user model for
+those suggestions.
 
-The pipeline has two parts:
+The pipeline has three broad phases:
 
 1. Build indexed activity data in `logs-indexed/`.
-2. Run the discovery stages into `discovery_<provider>_<interval>/`.
+2. Slice the indexed activity into interval rows in `data/`.
+3. Run the discovery stages into `discovery_<provider>_<interval>m/`.
+
+At a high level:
+
+```text
+../powernap/logs/
+  -> staging/*.jsonl
+  -> logs-indexed/<connector>/<date>.jsonl
+  -> data/log_intervals_<N>m.jsonl
+  -> discovery_<provider>_<N>m/01_goals/
+  -> discovery_<provider>_<N>m/02a_combined/
+  -> discovery_<provider>_<N>m/02b_bridges/
+  -> discovery_<provider>_<N>m/02c_suggestion_inputs/
+  -> discovery_<provider>_<N>m/03_bangers/
+  -> discovery_<provider>_<N>m/04_questions/
+```
 
 ## Prerequisites
 
@@ -95,10 +113,10 @@ discovery_codex_15m/
   04_questions/
 ```
 
-Run the stages in order (this will run on the first ten 15 min interval):
+Run the stages in order. This example runs the first ten 15-minute intervals:
 
 ```bash
-uv run scripts/run_discovery_goals.py --provider codex --interval-indexes 0-10 --jobs 2
+uv run scripts/run_discovery_goals.py --provider codex --interval-indexes 0-9 --jobs 2
 uv run scripts/run_discovery_combine.py --provider codex
 uv run scripts/run_discovery_bridges.py --provider codex
 uv run scripts/build_suggestion_inputs.py
@@ -109,7 +127,7 @@ uv run scripts/run_discovery_questions.py --provider codex --jobs 2
 Or use Claude:
 
 ```bash
-uv run scripts/run_discovery_goals.py --provider claude --interval-indexes 0-10 --jobs 2
+uv run scripts/run_discovery_goals.py --provider claude --interval-indexes 0-9 --jobs 2
 uv run scripts/run_discovery_combine.py --provider claude --force
 uv run scripts/run_discovery_bridges.py --provider claude --force
 uv run scripts/build_suggestion_inputs.py --discovery-dir discovery_claude_15m
@@ -132,6 +150,10 @@ Writes one file per selected interval:
 ```text
 discovery_codex_15m/01_goals/goal_<interval_index>.json
 ```
+
+Each run gets an isolated agent workdir by default. For this stage the agent
+can see `logs-indexed/` and an empty `agent-output/` directory, then the runner
+copies the created goal JSON back into the discovery directory.
 
 Select intervals with:
 
@@ -208,6 +230,9 @@ Run a subset with:
 --combined-indexes 0,4,8-10
 ```
 
+Despite the option name, banger indexes refer to rows in
+`02c_suggestion_inputs/inputs.json` when that file exists.
+
 Run several `02c_suggestion_inputs` in each model call:
 
 ```bash
@@ -247,6 +272,10 @@ discovery_codex_15m/04_questions/final_questions.json
 
 `final_questions.json` is the final consolidated artifact.
 
+If a question run is interrupted or only a subset succeeds, rerun the same
+command without `--force` to skip completed question files and rebuild
+`final_questions.json` from whatever completed files are present.
+
 Each question file stores the exact 100 past context events used for training:
 
 ```text
@@ -254,7 +283,7 @@ context_events + question -> answer
 ```
 
 The stored artifact also keeps generation metadata such as `why_it_matters`,
-`evidence_grounding`, `banger_dimension`, and `question_basis`.
+`evidence_grounding`, and `question_basis`.
 
 Export the training-visible JSONL rows, excluding generation metadata:
 
@@ -302,9 +331,27 @@ Continue after per-item failures:
 --continue-on-error
 ```
 
+Run multiple selected model calls concurrently:
+
+```bash
+--jobs 4
+```
+
+## Inspect Outputs
+
+Serve the local discovery viewer:
+
+```bash
+uv run scripts/serve_discovery_viewer.py --discovery-dir discovery_codex_15m
+```
+
+The viewer exposes tabs for per-interval goals, combined goals, banger
+opportunities, and generated question sets.
+
 ## Quick Smoke Test
 
-After indexing and interval creation, run one interval through the first stage:
+After indexing and interval creation, preview one interval through the first
+stage:
 
 ```bash
 uv run scripts/run_discovery_goals.py --provider codex --interval-indexes 0 --dry-run
@@ -315,6 +362,8 @@ Then run a real small pass:
 ```bash
 uv run scripts/run_discovery_goals.py --provider codex --interval-indexes 0
 uv run scripts/run_discovery_combine.py --provider codex --force
+uv run scripts/run_discovery_bridges.py --provider codex --force
+uv run scripts/build_suggestion_inputs.py --discovery-dir discovery_codex_15m
 uv run scripts/run_discovery_bangers.py --provider codex --combined-indexes 0
 uv run scripts/run_discovery_questions.py --provider codex --combined-indexes 0
 ```

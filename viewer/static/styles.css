@@ -209,6 +209,15 @@ select {
   margin-bottom: 0.75rem;
 }
 
+.thread-header {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .collapsible-card summary {
   list-style: none;
   padding: 0.85rem 1rem;

@@ -413,14 +413,21 @@ async function loadQuestionDetail(questionId) {
     `/api/runs/${encodeURIComponent(state.run)}/questions/${encodeURIComponent(questionId)}`,
   );
   const questions = data.questions || {};
-  const qaPairs = questions.qa_pairs || [];
+  const threads = questions.threads || [];
+  const totalPairs = threads.reduce(
+    (sum, thread) => sum + (thread.qa_pairs?.length || 0),
+    0,
+  );
 
   detailContent.innerHTML = "";
   detailContent.appendChild(
     createCollapsibleCard(
       questions.suggestion_title || questionId,
       `
-        <div class="badge-row"><span class="badge">${qaPairs.length} Q/A pairs</span></div>
+        <div class="badge-row">
+          <span class="badge">${threads.length} threads</span>
+          <span class="badge">${totalPairs} Q/A pairs</span>
+        </div>
         <div class="link-row">
           <button class="link-button" data-link="combined/${data.combined_index}">View combined</button>
           <button class="link-button" data-link="bangers/${data.combined_index}">View bangers</button>
@@ -431,18 +438,25 @@ async function loadQuestionDetail(questionId) {
   );
   bindLinkButtons(detailContent);
 
-  qaPairs.forEach((pair, index) => {
-    detailContent.appendChild(
-      createCollapsibleCard(
-        pair.question || `Q/A ${index + 1}`,
-        `
-          <div class="badge-row"><span class="badge">Difficulty ${pair.question_difficulty ?? "?"}</span></div>
-          ${field("Answer", pair.answer)}
-          ${field("Why it matters", pair.why_it_matters)}
-          ${field("Future rationalization", pair.future_rationalization)}
-        `,
-      ),
-    );
+  threads.forEach((thread, threadIndex) => {
+    const pairs = thread.qa_pairs || [];
+    const threadHeader = document.createElement("h3");
+    threadHeader.className = "thread-header";
+    threadHeader.textContent = `Thread ${thread.thread_id ?? threadIndex} · ${pairs.length} Q/A pairs`;
+    detailContent.appendChild(threadHeader);
+    pairs.forEach((pair, index) => {
+      detailContent.appendChild(
+        createCollapsibleCard(
+          `Q${pair.q_id ?? index}. ${pair.question || `Q/A ${index + 1}`}`,
+          `
+            <div class="badge-row"><span class="badge">Difficulty ${pair.question_difficulty ?? "?"}</span></div>
+            ${field("Answer", pair.answer)}
+            ${field("Why it matters", pair.why_it_matters)}
+          `,
+          true,
+        ),
+      );
+    });
   });
 }
 
