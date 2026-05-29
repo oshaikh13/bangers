@@ -10,8 +10,9 @@ You may use subagents to help. You MUST search through additional logs (in the l
 
 {combined_json_element}
 
-The input is a batch. Each item has `input_index`, `output_path`, and `input`.
-The `input` object contains the goal or bridge fields: `type`, `name`, `time`,
+The input is a batch object with `output_path` and `items`. Each item has
+`input_index` and `input`. The `input` object contains the goal or bridge fields:
+`type`, `name`, `time`,
 `usefulness`, `confidence`, `disregard`, `context`, `reasoning`, and
 `description`.
 
@@ -72,42 +73,42 @@ Here are a few examples of great suggestions — these are suggestions that are 
 
 1. Comparative research before a decision
   - Context: The user was evaluating inference providers.
-  - Great suggestion: “I can research the major inference providers, compare them across latency, pricing, model support, reliability, API ergonomics, and deployment constraints, then produce a concrete recommendation for your use case.”
+  - Great suggestion: “I can compare the inference providers you’ve been evaluating and give you a concrete recommendation for your use case.”
   - Why it is good: It turns scattered exploration into a decision-ready artifact; and it's something a user might not have time to do.
 
 2. Briefing before meeting a new person
   - Context: The user was about to meet someone new.
-  - Great suggestion: “Before your meeting, I can pull together a short briefing on this person’s prior work, recent projects, publications, and the parts most relevant to your current work, plus a few high-leverage questions to ask.”
+  - Great suggestion: “I can pull together a short briefing on [person] before your meeting with them.”
   - Why it is good: It arrives right before context matters and helps the user show up prepared.
 
 3. Training run analysis
   - Context: The user was training a model on Tinker and the logs were stored locally.
-  - Great suggestion: “I can analyze the local training logs, plot loss curves and other metrics, flag anomalies, compare runs, and summarize what seems to be working or failing. If useful, I can package the plots and run comparisons in a small dashboard.”
+  - Great suggestion: “I can analyze the [run name] training logs and tell you what’s working and what isn’t.”
   - Why it is good: It investigates meaningful anomalies and produces actionable debugging insight; and it's also something you think the user doesn't have figured out yet.
 
 4. Paper-review drafting
   - Context: The user had notes on a paper review but still needed to write the full review.
-  - Great suggestion: “I can turn your review notes into a full structured review in your usual style, including summary, strengths, weaknesses, questions, actionable feedback, and evidence for each critique.”
+  - Great suggestion: “I can turn your notes into a complete review of [paper title] ready to submit.”
   - Why it is good: It picks up after the main intellectual work is done and turns notes into the required artifact.
 
 5. Countering productive procrastination
   - Context: The user had been avoiding a blog post while completing other useful tasks.
-  - Great suggestion: “I can gather the notes, links, and arguments you have already produced, then draft three possible openings and a tight outline for the blog post.”
+  - Great suggestion: “I can draft an opening and outline for the [blog post topic] post using what you’ve already written.”
   - Why it is good: It converts scattered avoidance-adjacent work into concrete draft material the user can react to.
 
 6. Helping with difficult purchase decisions
   - Context: The user was spending too long deliberating about a large purchase.
-  - Great suggestion: “I can turn your tabs and notes into a decision brief: criteria, tradeoffs, total cost, risks, a recommended default, and what would change the recommendation.”
+  - Great suggestion: “I can turn your research on [product] into a decision brief with a clear recommended default.”
   - Why it is good: It turns circular deliberation into a bounded decision artifact while leaving the purchase decision to the user.
 
 7. Slide review before a talk
   - Context: The user has a slide deck for an upcoming talk and there is enough context about the talk content and audience.
-  - Great suggestion: “I can review your slides based on what you’re trying to communicate and who you’re presenting to, then give concrete suggestions on what to improve, cut, reorder, clarify, or redesign.”
+  - Great suggestion: “I can review your [talk name] slides against your goal and audience and give you suggestions on what to edit, add, or remove.”
   - Why it is good: It helps the user improve the presentation at the moment when the deck is concrete enough to critique but still early enough to revise before presenting. The user also likely won't think of or have time to solicit critique right away.
 
 8. Preparing a formal submission
   - Context: The user has a formal submission due (a grant proposal, a permit renewal, a conference camera-ready, or a benefits claim) with source material spread across past versions, a current draft, supporting spreadsheets, and the program instructions.
-  - Great suggestion: "I can produce a fully drafted submission with every field populated from your documents, each value sourced back to its origin, and the three ambiguous items flagged with the program instructions quoted side-by-side — so you review one document and submit it yourself."
+  - Great suggestion: "I can produce a fully drafted [grant/permit/submission type] ready for your review, with ambiguous fields called out."
   - Why it is good: It produces the actual artifact the user would otherwise build manually under deadline pressure, while leaving the consequential submission step to the user. The artifact is the draft itself, not a checklist of what to gather.
 
 ## Timestamps
@@ -137,26 +138,31 @@ For each suggestion, include:
 
 ## Output format
 
-For each batch item, write JSON only to its `output_path`. Do not include markdown, commentary, or extra text in those files.
+Write JSON only to the batch `output_path`. Do not include markdown, commentary or extra text in that file. Include one entry in `bangers` for each input item.
 
 Use this shape:
 
 {
-  "goals": [
+  "bangers": [
     {
-      "goal": string,
-      "opportunities": [
+      "input_index": 0,
+      "goals": [
         {
-          "timestamp": string,
-          "trigger_evidence": [string],
-          "why_now": string,
-          "suggestion": string,
-          "action": string,
-          "expected_artifact": string,
-          "usefulness": 1,
-          "confidence": 1,
-          "surprise": 1,
-          "disregard": 1
+          "goal": string,
+          "opportunities": [
+            {
+              "timestamp": string,
+              "trigger_evidence": [string],
+              "why_now": string,
+              "suggestion": string,
+              "action": string,
+              "expected_artifact": string,
+              "usefulness": 1,
+              "confidence": 1,
+              "surprise": 1,
+              "disregard": 1
+            }
+          ]
         }
       ]
     }
@@ -166,94 +172,30 @@ Use this shape:
 Minimal example:
 
 {
-  "goals": [
+  "bangers": [
     {
-      "goal": "Choose an inference provider for a new eval pipeline",
-      "opportunities": [
+      "input_index": 0,
+      "goals": [
         {
-          "timestamp": "2025-02-14T15:20:00",
-          "trigger_evidence": [
-            "User opened Together AI, Fireworks, Groq, Replicate, and OpenRouter documentation pages within the same work session",
-            "User searched for 'batch inference pricing', 'hosted vLLM latency', and 'OpenAI-compatible inference API'",
-            "User has a notes file mentioning constraints: must support Llama models, needs low-latency batch jobs, and should be easy to swap into an existing OpenAI-style client"
-          ],
-          "why_now": "The user has clearly moved from casual browsing to active provider evaluation, and there is enough context to produce a useful comparison before they spend more time switching between tabs.",
-          "suggestion": "I can compare these inference providers for your specific eval pipeline and recommend the best default plus a fallback option.",
-          "action": "Research Together AI, Fireworks, Groq, Replicate, and OpenRouter across pricing, latency, model availability, rate limits, batching support, reliability, and OpenAI-compatible API ergonomics. Then map each provider against the user's stated constraints.",
-          "expected_artifact": "provider_comparison_report",
-          "usefulness": 1,
-          "confidence": 1,
-          "surprise": 1,
-          "disregard": 1
-        },
-        {
-          "timestamp": "2025-02-14T16:05:00",
-          "trigger_evidence": [
-            "User has a draft comparison table but no final choice",
-            "User opened the eval pipeline code and inspected the current OpenAI client wrapper",
-            "User searched for 'OpenRouter python client example' and 'Together OpenAI compatible endpoint'"
-          ],
-          "why_now": "The research phase appears mostly complete, and the user is now close to implementation. A recommendation would prevent the comparison from becoming open-ended deliberation.",
-          "suggestion": "I can turn the provider research into a concrete implementation plan and pick the provider that minimizes code changes.",
-          "action": "Draft a recommendation, explain the tradeoff, identify the exact client wrapper changes needed, and prepare a small migration checklist for the user to review before changing code.",
-          "expected_artifact": "implementation_recommendation_and_checklist",
-          "usefulness": 1,
-          "confidence": 1,
-          "surprise": 1,
-          "disregard": 1
-        }
-      ]
-    },
-    {
-      "goal": "Finish a UIST paper review",
-      "opportunities": [
-        {
-          "timestamp": "2025-02-15T10:15:00",
-          "trigger_evidence": [
-            "User opened a UIST paper PDF and highlighted the related-work section",
-            "User wrote a note: 'not sure this is actually novel vs prior mixed-initiative tools'",
-            "User searched for two cited papers and one uncited phrase from the introduction"
-          ],
-          "why_now": "The user is still forming their critique, so related work can shape the review before the main judgment is locked in.",
-          "suggestion": "I can find closely related papers and summarize whether this paper is actually distinct from prior mixed-initiative systems.",
-          "action": "Search for related papers, group them by research angle, identify the closest baselines, and summarize what the reviewed paper adds or misses relative to them.",
-          "expected_artifact": "related_work_brief",
-          "usefulness": 1,
-          "confidence": 1,
-          "surprise": 1,
-          "disregard": 1
-        },
-        {
-          "timestamp": "2025-02-15T11:40:00",
-          "trigger_evidence": [
-            "User has written bullets under 'strengths', 'weaknesses', and 'questions'",
-            "User has a clear main concern: the evaluation does not support the strongest claim",
-            "User has not yet written the final review text in the review form"
-          ],
-          "why_now": "The intellectual content is mostly present, but the user still needs to turn it into a polished review. This is exactly where drafting assistance saves time without replacing judgment.",
-          "suggestion": "I can turn your notes into a full structured review in your usual review style.",
-          "action": "Synthesize the notes into a review with summary, strengths, weaknesses, detailed comments, questions for authors, an overall recommendation rationale, and evidence for each critique.",
-          "expected_artifact": "paper_review_draft",
-          "usefulness": 1,
-          "confidence": 1,
-          "surprise": 1,
-          "disregard": 1
-        },
-        {
-          "timestamp": "2025-02-15T12:25:00",
-          "trigger_evidence": [
-            "User has a mostly complete review draft",
-            "User is editing phrases like 'the authors fail to' and 'this is not convincing'",
-            "User opened the submission page shortly after finishing the draft"
-          ],
-          "why_now": "The review is complete enough to critique, but it has not yet been submitted. This is the last high-leverage moment to improve fairness, specificity, and author-facing tone.",
-          "suggestion": "I can check whether any parts of the review are unfair, under-supported, or discouraging to authors, and suggest more constructive wording.",
-          "action": "Review the draft for harsh language, unsupported claims, missing evidence, and places where critique could be made more actionable. Provide line-level edits.",
-          "expected_artifact": "review_revision_notes",
-          "usefulness": 1,
-          "confidence": 1,
-          "surprise": 1,
-          "disregard": 1
+          "goal": "Choose an inference provider for a new eval pipeline",
+          "opportunities": [
+            {
+              "timestamp": "2025-02-14T15:20:00",
+              "trigger_evidence": [
+                "User opened Together AI, Fireworks, Groq, Replicate, and OpenRouter documentation pages within the same work session",
+                "User searched for 'batch inference pricing', 'hosted vLLM latency', and 'OpenAI-compatible inference API'",
+                "User has a notes file mentioning constraints: must support Llama models, needs low-latency batch jobs, and should be easy to swap into an existing OpenAI-style client"
+              ],
+              "why_now": "The user has moved from casual browsing to active provider evaluation, and there is enough context to produce a useful comparison.",
+              "suggestion": "I can compare these inference providers for your specific eval pipeline and recommend the best default plus a fallback option.",
+              "action": "Research Together AI, Fireworks, Groq, Replicate, and OpenRouter across pricing, latency, model availability, rate limits, batching support, reliability, and OpenAI-compatible API ergonomics.",
+              "expected_artifact": "provider_comparison_report",
+              "usefulness": 8,
+              "confidence": 7,
+              "surprise": 5,
+              "disregard": 6
+            }
+          ]
         }
       ]
     }

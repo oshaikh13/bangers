@@ -9,8 +9,7 @@ The user model is a question answering model that can answer any questions about
 
 
 ## Details
-You are given a proactive suggestion (an artifact) that an assistant
-might surface to the user.
+You are given a proactive suggestion (an artifact) that an assistant might surface to the user.
 
 Your job is to generate Q/A pairs that the assistant could:
 
@@ -26,16 +25,10 @@ d) etc. anything else from the user model needed for executing and making a usef
 
 
 The question is asked at a specific timestamp. The past before this is the history **H** 
-The model has no access to the future.
-You, the labeler, have both H and the **future** logs (call this window
-**F**) — search `logs-indexed/` freely in both directions. Use F to ground
-ground-truth answers; the user model has to learn to predict those answers
-from H alone.
 
-For question generation you MAY use the future to determine the answer,
-but the **question and answer text themselves must not reference the
-future**. Write the answer as a confident statement the user model would
-make from inside H. The hindsight evidence goes in `evidence_grounding`,
+The model has no access to the future. You, the labeler, have both H and the **future** logs (call this window **F**) — search `logs-indexed/` freely in both directions. Use F to ground ground-truth answers; the user model has to learn to predict those answers from H alone.
+
+For question generation you MAY use the future to determine the answer, but the **question and answer text themselves must not reference the future**. Write the answer as a confident statement the user model would make from inside H. The hindsight evidence goes in `evidence_grounding`,
 which is dropped before training.
 
 - You MUST search through additional logs (in the `logs-indexed/` folder). Use the times to identify relevant logs.
@@ -77,23 +70,17 @@ Good Q/A pairs should:
   some event already in H).
 - Ask questions about the affective state of the user. Especially about the user's frustrations, and affordances.
 
-
-
 ## What NOT to ask
 
-- **No multiple-choice questions with enumerated options.** Bad: "Which
-  route will the user pick: A, B, or C?" Good: "Which route is the user
-  most likely to take?"
-- **No compound questions.** Bad: "Will the user upload proof to the
-  portal, and which file should be prepared for that?" Split it, or pick
-  one.
-- **No questions stuffed with proper-noun context.** If a question needs
-  three named entities, a clause about what the user did earlier, and a
-  conditional, it's too complex — an assistant wouldn't ask it. Trim to
-  one focused thing.
+- **No multiple-choice questions with enumerated options.** 
+Bad: "Which route will the user pick: A, B, or C?" 
+Good: "Which route is the user most likely to take?"
+- **No compound questions.** 
+Bad: "Will the user upload proof to the portal, and which file should be prepared for that?" Split it, or pick one.
+- **No questions stuffed with proper-noun context.** 
+If a question needs three named entities, a clause about what the user did earlier, and a conditional, it's too complex — an assistant wouldn't ask it. Trim to one focused thing.
 - **No questions whose answer is fully restated in the suggestion**
-  (`suggestion`, `action`, `expected_artifact`, `goal`). Those teach the
-  user model nothing the banger assistant doesn't already have.
+(`suggestion`, `action`, `expected_artifact`, `goal`). Those teach the user model nothing the banger assistant doesn't already have.
 
 ## Self-containment
 
@@ -113,22 +100,16 @@ generically. Look it up before naming it.
 The text of the question and answer must read as if produced from inside
 H. Banned phrases (and any close paraphrase):
 
-- In **questions**: "future logs", "later", "what the user ends up", "in
-  hindsight", "would have matched", "after the suggestion fires".
-- In **answers**: "Future logs show", "Later, the user…", "As it turns
-  out", "We can see in the logs that…", "Looking at what happens next…".
+- In **questions**: "future logs", "later", "what the user ends up", "in hindsight", "would have matched", "after the suggestion fires".
 
-Write the answer as the user model's confident statement. You used F to
-know it; the answer text is the prediction itself, not a meta-comment
-about evidence.
+- In **answers**: "Future logs show", "Later, the user…", "As it turns out", "We can see in the logs that…", "Looking at what happens next…".
 
-- ❌ Bad answer: "Future logs show the user abandons the IRS Free File
-  path and uses TurboTax."
-- ✅ Good answer: "The user will most likely file through TurboTax. The
-  Free File draft they started is set aside without being submitted."
+Write the answer as the user model's confident statement. You used F to know it; the answer text is the prediction itself, not a meta-comment about evidence.
 
-Past- and present-tense Q/As are fine; just match tense between question
-and answer (past Q → past A, present Q → present A, future Q → future A).
+- ❌ Bad answer: "Future logs show the user abandons the IRS Free File path and uses TurboTax."
+- ✅ Good answer: "The user will most likely file through TurboTax. The Free File draft they started is set aside without being submitted."
+
+Past- and present-tense Q/As are fine; just match tense between question and answer (past Q → past A, present Q → present A, future Q → future A).
 
 ## Output format
 
@@ -176,10 +157,6 @@ Field notes:
 Do not output `context_events`. The runner attaches the stored context
 events to each Q/A procedurally from `banger_timestamp`.
 
-Remember: you may USE the future to ground the answer, but the question
-and answer text must not explicitly reference future logs.
+Remember: you may USE the future to ground the answer, but the question and answer text must not explicitly reference future logs.
 
-Prefer questions whose answers are directly useful for execution. Fewer
-strong pairs are better than many weak ones.
-IMPORTANT: Most questions will be generic! Like "What is the user's goal right now?" or "What is the user's current frustration?" or "How will the user respond to this email?" ... this is normal and expected.
-The follow-up questions will be more specific. 
+Prefer questions whose answers are directly useful for execution. Fewer strong pairs are better than many weak ones. IMPORTANT: Most questions will be generic! Like "What is the user's goal right now?" or "What is the user's current frustration?" or "How will the user respond to this email?" ... this is normal and expected. The follow-up questions will be more specific. 

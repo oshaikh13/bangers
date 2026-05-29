@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Flatten banger opportunity files into a timestamp-sorted Markdown list."""
+"""Flatten banger opportunity batch files into a timestamp-sorted Markdown list."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ TIMESTAMP_RE = re.compile(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Combine discovery banger_*.json files into a Markdown list sorted "
+            "Combine discovery bangers_*.json files into a Markdown list sorted "
             "by opportunity timestamp."
         )
     )
@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
         "--bangers-dir",
         type=Path,
         help=(
-            "Directory containing banger_*.json files. Defaults to "
+            "Directory containing bangers_*.json files. Defaults to "
             "<discovery-dir>/03_bangers."
         ),
     )
@@ -49,15 +49,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def banger_files(bangers_dir: Path) -> list[tuple[int, Path]]:
-    files: list[tuple[int, Path]] = []
-    for path in sorted(bangers_dir.glob("banger_*.json")):
-        try:
-            combined_index = int(path.stem.removeprefix("banger_"))
-        except ValueError:
-            continue
-        files.append((combined_index, path))
-    return files
+def banger_files(bangers_dir: Path) -> list[Path]:
+    return sorted(
+        [
+            path
+            for pattern in ("bangers_*.json", "banger_*.json")
+            for path in bangers_dir.glob(pattern)
+        ]
+    )
 
 
 def load_json_object(path: Path) -> dict[str, Any]:
@@ -68,6 +67,33 @@ def load_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RuntimeError(f"expected JSON object in {path}")
     return data
+
+
+def iter_banger_items(path: Path) -> list[tuple[int, dict[str, Any]]]:
+    data = load_json_object(path)
+    if "bangers" not in data:
+        try:
+            combined_index = int(path.stem.removeprefix("banger_"))
+        except ValueError as exc:
+            raise RuntimeError(
+                f"legacy banger file is missing numeric index: {path}"
+            ) from exc
+        return [(combined_index, data)]
+
+    bangers = data.get("bangers")
+    if not isinstance(bangers, list):
+        raise RuntimeError(f"expected bangers array in {path}")
+    items: list[tuple[int, dict[str, Any]]] = []
+    for index, item in enumerate(bangers):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"expected bangers[{index}] object in {path}")
+        input_index = item.get("input_index")
+        if not isinstance(input_index, int):
+            raise RuntimeError(
+                f"expected bangers[{index}].input_index integer in {path}"
+            )
+        items.append((input_index, item))
+    return items
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -90,48 +116,48 @@ def parse_timestamp(value: Any) -> datetime | None:
 
 def load_opportunities(bangers_dir: Path) -> list[dict[str, Any]]:
     opportunities: list[dict[str, Any]] = []
-    for combined_index, path in banger_files(bangers_dir):
-        data = load_json_object(path)
-        goals = data.get("goals")
-        if not isinstance(goals, list):
-            raise RuntimeError(f"expected goals array in {path}")
+    for path in banger_files(bangers_dir):
+        for combined_index, data in iter_banger_items(path):
+            goals = data.get("goals")
+            if not isinstance(goals, list):
+                raise RuntimeError(f"expected goals array in {path}")
 
-        for goal_index, goal in enumerate(goals):
-            if not isinstance(goal, dict):
-                continue
-            goal_name = goal.get("goal")
-            goal_opportunities = goal.get("opportunities")
-            if not isinstance(goal_opportunities, list):
-                continue
-
-            for opportunity_index, opportunity in enumerate(goal_opportunities):
-                if not isinstance(opportunity, dict):
+            for goal_index, goal in enumerate(goals):
+                if not isinstance(goal, dict):
                     continue
-                parsed = parse_timestamp(opportunity.get("timestamp"))
-                opportunities.append(
-                    {
-                        "sequence_index": 0,
-                        "timestamp": opportunity.get("timestamp"),
-                        "sort_timestamp": parsed,
-                        "display_timestamp": format_timestamp(parsed),
-                        "goal": goal_name,
-                        "title": opportunity.get("title"),
-                        "suggestion": opportunity.get("suggestion"),
-                        "why_now": opportunity.get("why_now"),
-                        "action": opportunity.get("action"),
-                        "expected_artifact": opportunity.get("expected_artifact"),
-                        "trigger_evidence": opportunity.get("trigger_evidence", []),
-                        "source": {
-                            "bangers_path": str(path),
-                            "combined_index": combined_index,
-                            "goal_index": goal_index,
-                            "opportunity_index": opportunity_index,
-                            "opportunity_id": (
-                                f"{combined_index}_{goal_index}_{opportunity_index}"
-                            ),
-                        },
-                    }
-                )
+                goal_name = goal.get("goal")
+                goal_opportunities = goal.get("opportunities")
+                if not isinstance(goal_opportunities, list):
+                    continue
+
+                for opportunity_index, opportunity in enumerate(goal_opportunities):
+                    if not isinstance(opportunity, dict):
+                        continue
+                    parsed = parse_timestamp(opportunity.get("timestamp"))
+                    opportunities.append(
+                        {
+                            "sequence_index": 0,
+                            "timestamp": opportunity.get("timestamp"),
+                            "sort_timestamp": parsed,
+                            "display_timestamp": format_timestamp(parsed),
+                            "goal": goal_name,
+                            "title": opportunity.get("title"),
+                            "suggestion": opportunity.get("suggestion"),
+                            "why_now": opportunity.get("why_now"),
+                            "action": opportunity.get("action"),
+                            "expected_artifact": opportunity.get("expected_artifact"),
+                            "trigger_evidence": opportunity.get("trigger_evidence", []),
+                            "source": {
+                                "bangers_path": str(path),
+                                "combined_index": combined_index,
+                                "goal_index": goal_index,
+                                "opportunity_index": opportunity_index,
+                                "opportunity_id": (
+                                    f"{combined_index}_{goal_index}_{opportunity_index}"
+                                ),
+                            },
+                        }
+                    )
     opportunities.sort(
         key=lambda item: (
             item["sort_timestamp"] is None,
