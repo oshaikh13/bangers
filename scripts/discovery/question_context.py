@@ -151,7 +151,15 @@ def training_rows_from_final_questions(items: Iterable[Any]) -> list[dict[str, A
 
         questions = item.get("questions")
         if not isinstance(questions, dict):
+            questions = item.get("qa")
+        if not isinstance(questions, dict):
             questions = item
+
+        qa_type = questions.get("qa_type")
+        if not isinstance(qa_type, str):
+            qa_type = item.get("qa_type")
+        if not isinstance(qa_type, str):
+            qa_type = None
 
         context_events = questions.get("context_events")
         if not isinstance(context_events, list):
@@ -159,18 +167,23 @@ def training_rows_from_final_questions(items: Iterable[Any]) -> list[dict[str, A
         if not isinstance(context_events, list):
             continue
 
-        threads = questions.get("threads")
-        if not isinstance(threads, list):
-            continue
-
         projected_context = training_context_projection(context_events)
-        for thread in threads:
-            if not isinstance(thread, dict):
-                continue
-            thread_id = thread.get("thread_id")
-            qa_pairs = thread.get("qa_pairs")
-            if not isinstance(qa_pairs, list):
-                continue
+
+        thread_batches: list[tuple[Any, list[Any]]] = []
+        threads = questions.get("threads")
+        if isinstance(threads, list):
+            for thread in threads:
+                if not isinstance(thread, dict):
+                    continue
+                pairs = thread.get("qa_pairs")
+                if isinstance(pairs, list):
+                    thread_batches.append((thread.get("thread_id"), pairs))
+        else:
+            flat_pairs = questions.get("qa_pairs")
+            if isinstance(flat_pairs, list):
+                thread_batches.append((0, flat_pairs))
+
+        for thread_id, qa_pairs in thread_batches:
             for pair in qa_pairs:
                 if not isinstance(pair, dict):
                     continue
@@ -178,13 +191,17 @@ def training_rows_from_final_questions(items: Iterable[Any]) -> list[dict[str, A
                 answer = pair.get("answer")
                 if not isinstance(question, str) or not isinstance(answer, str):
                     continue
-                rows.append(
-                    {
-                        "context_events": projected_context,
-                        "thread_id": thread_id,
-                        "q_id": pair.get("q_id"),
-                        "question": question,
-                        "answer": answer,
-                    }
-                )
+                row = {
+                    "context_events": projected_context,
+                    "thread_id": thread_id,
+                    "q_id": pair.get("q_id"),
+                    "question": question,
+                    "answer": answer,
+                }
+                category = pair.get("category")
+                if isinstance(category, str) and category:
+                    row["category"] = category
+                if qa_type is not None:
+                    row["qa_type"] = qa_type
+                rows.append(row)
     return rows

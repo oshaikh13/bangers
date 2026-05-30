@@ -412,3 +412,91 @@ select {
     overflow-y: auto;
   }
 }
+
+.logs-window-card {
+  margin-top: 1.25rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface, #f7f7f8);
+  border: 1px solid var(--border, #e2e2e8);
+  border-radius: 6px;
+}
+
+.logs-window-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.logs-window-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.logs-window-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.logs-window-controls input[type="number"] {
+  width: 5rem;
+  margin-left: 0.25rem;
+}
+
+.logs-window-meta {
+  font-size: 0.8rem;
+  color: var(--muted, #6b6b76);
+  margin-bottom: 0.4rem;
+}
+
+.logs-window-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 32rem;
+  overflow-y: auto;
+  border: 1px solid var(--border, #e2e2e8);
+  border-radius: 4px;
+  background: var(--background, #ffffff);
+}
+
+.log-event {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border, #e2e2e8);
+  display: grid;
+  grid-template-columns: 14rem 1fr;
+  gap: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.log-event:last-child {
+  border-bottom: none;
+}
+
+.log-event-meta {
+  color: var(--muted, #6b6b76);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-event-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.logs-window-divider {
+  padding: 0.45rem 0.6rem;
+  background: var(--accent-soft, #fff1d6);
+  color: var(--accent, #8a5a00);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border, #e2e2e8);
+}

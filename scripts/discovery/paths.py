@@ -10,6 +10,10 @@ DEFAULT_COMBINE_TEMPLATE = REPO_ROOT / "prompts" / "02a_discovery_combine.md"
 DEFAULT_BRIDGES_TEMPLATE = REPO_ROOT / "prompts" / "02b_discovery_bridges.md"
 DEFAULT_BANGERS_TEMPLATE = REPO_ROOT / "prompts" / "03_discovery_bangers.md"
 DEFAULT_QUESTIONS_TEMPLATE = REPO_ROOT / "prompts" / "04_discovery_questions.md"
+DEFAULT_GENERIC_QA_COMMON_TEMPLATE = (
+    REPO_ROOT / "prompts" / "10_generic_qa_common.md"
+)
+DEFAULT_GENERIC_QA_PROMPTS_DIR = REPO_ROOT / "prompts"
 
 
 def default_intervals_path(interval_minutes: int) -> Path:

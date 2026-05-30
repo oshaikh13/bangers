@@ -12,12 +12,15 @@ from viewer.data import (
     default_run_name,
     list_banger_indexes,
     list_discovery_runs,
+    list_generic_qa_items,
     list_goal_intervals,
     list_questions,
     load_all_goals,
     load_banger,
     load_combined,
+    load_generic_qa,
     load_goal,
+    load_logs_window,
     load_question,
     resolve_run_path,
 )
@@ -51,6 +54,7 @@ def create_app(default_discovery_dir: Path | None = None) -> FastAPI:
                         "combined": run.has_combined,
                         "bangers": run.has_bangers,
                         "questions": run.has_questions,
+                        "generic_qa": run.has_generic_qa,
                     },
                 }
                 for run in runs
@@ -131,6 +135,30 @@ def create_app(default_discovery_dir: Path | None = None) -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return item
+
+    @app.get("/api/runs/{run_name}/generic-qa")
+    def get_generic_qa_items(run_name: str) -> dict:
+        run_path = _run_path_or_404(run_name)
+        return {"items": list_generic_qa_items(run_path)}
+
+    @app.get("/api/runs/{run_name}/generic-qa/{qa_type}/{interval}")
+    def get_generic_qa_detail(run_name: str, qa_type: str, interval: int) -> dict:
+        run_path = _run_path_or_404(run_name)
+        try:
+            item = load_generic_qa(run_path, qa_type, interval)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"qa_type": qa_type, "interval_index": interval, "item": item}
+
+    @app.get("/api/logs-window")
+    def get_logs_window(ts: float, before: int = 200, after: int = 200) -> dict:
+        if before < 0 or after < 0:
+            raise HTTPException(
+                status_code=400, detail="before/after must be non-negative"
+            )
+        return load_logs_window(ts, before, after)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

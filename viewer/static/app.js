@@ -128,6 +128,8 @@ async function refreshCurrentTab() {
     await renderBangersTab();
   } else if (state.tab === "questions") {
     await renderQuestionsTab();
+  } else if (state.tab === "generic-qa") {
+    await renderGenericQaTab();
   }
 }
 
@@ -460,6 +462,189 @@ async function loadQuestionDetail(questionId) {
   });
 }
 
+async function renderGenericQaTab() {
+  const manifest = state.manifest;
+  const items = manifest.generic_qa || [];
+  listHeader.textContent =
+    items.length === 1 ? "1 generic QA file" : `${items.length} generic QA files`;
+  detailHeader.textContent = "Select a generic QA item";
+  itemList.innerHTML = "";
+
+  if (!manifest.stages.generic_qa || items.length === 0) {
+    detailContent.innerHTML = `<p class="empty-state">No generic QA files found for this run. Generate with <code>uv run scripts/run_generic_qa.py</code>.</p>`;
+    return;
+  }
+
+  for (const item of items) {
+    const tsLabel = shortIsoLabel(item.qa_timestamp);
+    const meta = `${item.qa_type} · interval ${item.interval_index} · ${item.pair_count} pairs${tsLabel ? ` · ${tsLabel}` : ""}`;
+    const selectionKey = `generic-qa/${item.qa_type}/${item.interval_index}`;
+    itemList.appendChild(
+      createListButton(
+        item.sample_question || `${item.qa_type} ${item.interval_index}`,
+        meta,
+        selectionKey,
+        state.selection === selectionKey,
+      ),
+    );
+  }
+
+  let selected = state.selection;
+  if (!selected?.startsWith("generic-qa/")) {
+    const first = items[0];
+    selected = `generic-qa/${first.qa_type}/${first.interval_index}`;
+  }
+  const rest = selected.slice("generic-qa/".length);
+  const slash = rest.indexOf("/");
+  if (slash === -1) {
+    return;
+  }
+  const qaType = rest.slice(0, slash);
+  const interval = rest.slice(slash + 1);
+  await loadGenericQaDetail(qaType, interval);
+}
+
+async function loadGenericQaDetail(qaType, interval) {
+  state.selection = `generic-qa/${qaType}/${interval}`;
+  markActiveSelection();
+  detailHeader.textContent = `${qaType} · interval ${interval}`;
+  detailContent.innerHTML = "";
+
+  const data = await fetchJson(
+    `/api/runs/${encodeURIComponent(state.run)}/generic-qa/${encodeURIComponent(qaType)}/${encodeURIComponent(interval)}`,
+  );
+  const item = data.item || {};
+  const pairs = extractQaPairs(item);
+  const centerTs =
+    typeof item.qa_timestamp_ts === "number" ? item.qa_timestamp_ts : null;
+
+  detailContent.appendChild(
+    createCollapsibleCard(
+      `${qaType} · interval ${interval}`,
+      `
+        <div class="badge-row">
+          <span class="badge">${pairs.length} Q/A pairs</span>
+          <span class="badge">qa_timestamp ${escapeHtml(item.qa_timestamp || "?")}</span>
+        </div>
+      `,
+      true,
+    ),
+  );
+
+  pairs.forEach((pair, index) => {
+    detailContent.appendChild(
+      createCollapsibleCard(
+        `Q${pair.q_id ?? index}. ${pair.question || `Q/A ${index + 1}`}`,
+        `
+          <div class="badge-row">
+            <span class="badge">${escapeHtml(pair.category || qaType)}</span>
+            <span class="badge">${escapeHtml(pair.answer_basis || "?")}</span>
+            <span class="badge">${escapeHtml(pair.timescale || "?")}</span>
+            <span class="badge">Difficulty ${pair.question_difficulty ?? "?"}</span>
+          </div>
+          ${field("Answer", pair.answer)}
+          ${field("Verify at", pair.verify_at_iso)}
+          ${field("Why it matters", pair.why_it_matters)}
+          ${field("Evidence grounding", pair.evidence_grounding)}
+        `,
+        true,
+      ),
+    );
+  });
+
+  const logsCard = document.createElement("section");
+  logsCard.className = "logs-window-card";
+  logsCard.innerHTML = `
+    <div class="logs-window-header">
+      <h3>Logs around qa_timestamp</h3>
+      <div class="logs-window-controls">
+        <label>Past <input type="number" min="0" step="50" value="200" data-role="logs-before" /></label>
+        <label>Future <input type="number" min="0" step="50" value="200" data-role="logs-after" /></label>
+        <button type="button" data-role="logs-reload">Reload</button>
+      </div>
+    </div>
+    <div class="logs-window-body" data-role="logs-body">
+      <p class="empty-state">Loading…</p>
+    </div>
+  `;
+  detailContent.appendChild(logsCard);
+
+  const beforeInput = logsCard.querySelector('[data-role="logs-before"]');
+  const afterInput = logsCard.querySelector('[data-role="logs-after"]');
+  const reloadButton = logsCard.querySelector('[data-role="logs-reload"]');
+  const body = logsCard.querySelector('[data-role="logs-body"]');
+
+  async function reload() {
+    if (centerTs === null) {
+      body.innerHTML = `<p class="empty-state">qa_timestamp_ts missing from this file.</p>`;
+      return;
+    }
+    const before = Math.max(0, Number(beforeInput.value) || 0);
+    const after = Math.max(0, Number(afterInput.value) || 0);
+    body.innerHTML = `<p class="empty-state">Loading…</p>`;
+    try {
+      const window = await fetchJson(
+        `/api/logs-window?ts=${encodeURIComponent(centerTs)}&before=${before}&after=${after}`,
+      );
+      body.innerHTML = renderLogsWindow(window);
+    } catch (err) {
+      body.innerHTML = `<p class="empty-state">Failed to load logs: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  reloadButton.addEventListener("click", reload);
+  beforeInput.addEventListener("change", reload);
+  afterInput.addEventListener("change", reload);
+  await reload();
+}
+
+function extractQaPairs(item) {
+  if (!item || typeof item !== "object") return [];
+  if (Array.isArray(item.qa_pairs)) return item.qa_pairs;
+  const threads = item.threads;
+  if (Array.isArray(threads)) {
+    return threads.flatMap((thread) =>
+      Array.isArray(thread?.qa_pairs) ? thread.qa_pairs : [],
+    );
+  }
+  return [];
+}
+
+function renderLogsWindow(data) {
+  const past = data.past || [];
+  const future = data.future || [];
+  const meta = `Showing ${past.length}/${data.before_available} past · ${future.length}/${data.after_available} future`;
+  const centerLabel = formatTsIso(data.center_ts);
+  return `
+    <div class="logs-window-meta">${escapeHtml(meta)}</div>
+    <ol class="logs-window-list">
+      ${past.map(renderLogEvent).join("")}
+      <li class="logs-window-divider">— qa_timestamp ${escapeHtml(centerLabel)} —</li>
+      ${future.map(renderLogEvent).join("")}
+    </ol>
+  `;
+}
+
+function renderLogEvent(event) {
+  return `<li class="log-event"><span class="log-event-meta">${escapeHtml(event.ts_iso || "")} · ${escapeHtml(event.connector || "")}</span><span class="log-event-text">${escapeHtml(event.text || "")}</span></li>`;
+}
+
+function shortIsoLabel(value) {
+  if (!value) return "";
+  return String(value).replace("T", " ").replace(/\.\d+/, "").replace(/Z?$/, "Z");
+}
+
+function formatTsIso(ts) {
+  if (ts === undefined || ts === null) return "";
+  const numeric = Number(ts);
+  if (!Number.isFinite(numeric)) return String(ts);
+  try {
+    return new Date(numeric * 1000).toISOString().replace(/\.\d+Z$/, "Z");
+  } catch (err) {
+    return String(ts);
+  }
+}
+
 function createCollapsibleCard(title, bodyHtml, open = false) {
   const details = document.createElement("details");
   details.className = "collapsible-card";
@@ -517,7 +702,7 @@ function parseHash() {
   }
   const slash = hash.indexOf("/");
   if (slash === -1) {
-    if (["goals", "combined", "bangers", "questions"].includes(hash)) {
+    if (["goals", "combined", "bangers", "questions", "generic-qa"].includes(hash)) {
       state.tab = hash;
       state.selection = null;
     }
@@ -525,7 +710,7 @@ function parseHash() {
   }
   const tab = hash.slice(0, slash);
   const id = hash.slice(slash + 1);
-  if (["goals", "combined", "bangers", "questions"].includes(tab)) {
+  if (["goals", "combined", "bangers", "questions", "generic-qa"].includes(tab)) {
     state.tab = tab;
     state.selection = `${tab}/${id}`;
   }
