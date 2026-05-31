@@ -478,6 +478,19 @@ def validate_seed_filter_data(data: Any, all_seeds: list[dict[str, Any]], path: 
                 f"pre-banger seed ranking seeds[{index}].intervention_posture "
                 f"must be surface_now, wait, or stay_quiet: {path}"
             )
+        if seed.get("negative_reason") not in {
+            "none",
+            "self_done",
+            "obvious_next_step",
+            "interruptive",
+            "undergrounded",
+            "stale",
+        }:
+            raise RuntimeError(
+                f"pre-banger seed ranking seeds[{index}].negative_reason must "
+                f"be none, self_done, obvious_next_step, interruptive, "
+                f"undergrounded, or stale: {path}"
+            )
         for text_key in (
             "timing_reason",
             "marginal_value_reason",

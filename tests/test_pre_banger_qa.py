@@ -67,6 +67,7 @@ class PreBangerQATests(unittest.TestCase):
                                 "user_value": 9,
                                 "intervention_value_now": 8,
                                 "intervention_posture": "surface_now",
+                                "negative_reason": "none",
                                 "engagement_pull": 8,
                                 "surprise": 8,
                                 "personal_relevance": 9,
@@ -84,6 +85,7 @@ class PreBangerQATests(unittest.TestCase):
                                 "user_value": 7,
                                 "intervention_value_now": 2,
                                 "intervention_posture": "stay_quiet",
+                                "negative_reason": "self_done",
                                 "engagement_pull": 4,
                                 "surprise": 2,
                                 "personal_relevance": 7,
@@ -107,6 +109,7 @@ class PreBangerQATests(unittest.TestCase):
         self.assertEqual([seed["seed_id"] for seed in selected], ["cool_open", "self_done"])
         self.assertEqual(selected[0]["ranking_metadata"]["intervention_value_now"], 8)
         self.assertEqual(selected[1]["ranking_metadata"]["intervention_posture"], "stay_quiet")
+        self.assertEqual(selected[1]["ranking_metadata"]["negative_reason"], "self_done")
 
     def test_seed_ranking_rejects_binary_selection_label(self) -> None:
         all_seeds = [{"seed_id": "old_shape", "banger_timestamp": 0.0}]
@@ -229,6 +232,7 @@ def _seed() -> dict:
             "user_value": 9,
             "intervention_value_now": 8,
             "intervention_posture": "surface_now",
+            "negative_reason": "none",
             "timing_reason": "The user is at a high-leverage intervention moment.",
         },
     }
