@@ -29,7 +29,6 @@ Return JSON only:
   "seed_id": "string",
   "banger_timestamp": "string",
   "target_banger": {},
-  "context_events": [],
   "threads": [
     {
       "thread_id": 0,

@@ -12,10 +12,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from discovery.pre_banger_qa import (
+    final_pre_banger_qa_path,
     load_pre_banger_qa_template,
     load_seed_filter,
     load_seed_filter_template,
     parse_qa_types,
+    select_filtered_seeds,
+    select_seed_candidates_for_ranking,
     validate_seed_filter_data,
     validate_pre_banger_qa_data,
     write_final_pre_banger_qa,
@@ -126,6 +129,68 @@ class PreBangerQATests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "must not include selection_label"):
             validate_seed_filter_data(data, all_seeds, "seed_rankings.json")
 
+    def test_interval_rows_select_seed_candidates_by_banger_timestamp(self) -> None:
+        seeds = [
+            {
+                "seed_id": "inside",
+                "combined_index": 25,
+                "banger_timestamp": "2026-04-08T16:31:46.325Z",
+            },
+            {
+                "seed_id": "outside",
+                "combined_index": 29,
+                "banger_timestamp": "2026-04-08T18:00:00Z",
+            },
+        ]
+        interval_rows = [
+            {
+                "interval_index": 45,
+                "start_ts": 1775665424.439826,
+                "end_ts": 1775666324.439826,
+            }
+        ]
+        args = SimpleNamespace(seed_ids=None, combined_indexes=None, start=0, limit=None)
+
+        selected = select_seed_candidates_for_ranking(args, seeds, interval_rows)
+
+        self.assertEqual([seed["seed_id"] for seed in selected], ["inside"])
+
+    def test_select_filtered_seeds_combines_interval_and_start_limit(self) -> None:
+        seeds = [
+            {
+                "seed_id": "first",
+                "combined_index": 25,
+                "banger_timestamp": "2026-04-08T16:31:46.325Z",
+            },
+            {
+                "seed_id": "second",
+                "combined_index": 26,
+                "banger_timestamp": "2026-04-08T16:32:00Z",
+            },
+            {
+                "seed_id": "outside",
+                "combined_index": 29,
+                "banger_timestamp": "2026-04-08T18:00:00Z",
+            },
+        ]
+        interval_rows = [
+            {
+                "interval_index": 45,
+                "start_ts": 1775665424.439826,
+                "end_ts": 1775666324.439826,
+            }
+        ]
+        args = SimpleNamespace(
+            seed_ids=None,
+            combined_indexes=None,
+            start=1,
+            limit=1,
+        )
+
+        selected = select_filtered_seeds(args, seeds, interval_rows)
+
+        self.assertEqual([seed["seed_id"] for seed in selected], ["second"])
+
     def test_load_and_render_prompt_includes_hidden_seed_and_context(self) -> None:
         args = SimpleNamespace(
             common_template=REPO_ROOT / "prompts" / "20_pre_banger_common.md",
@@ -180,11 +245,34 @@ class PreBangerQATests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            write_final_pre_banger_qa(SimpleNamespace(pre_banger_qa_dir=pre_banger_dir))
+            write_final_pre_banger_qa(
+                SimpleNamespace(pre_banger_qa_dir=pre_banger_dir, interval_indexes=None)
+            )
 
             final_data = json.loads((pre_banger_dir / "final_qa.json").read_text())
             self.assertEqual(len(final_data), 2)
             self.assertEqual({item["qa_type"] for item in final_data}, {"curiosity", "threaded_mix"})
+
+    def test_write_final_pre_banger_qa_uses_interval_specific_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pre_banger_dir = Path(tmp_dir) / "20_pre_banger_qa"
+            flat_dir = pre_banger_dir / "timing"
+            flat_dir.mkdir(parents=True)
+            (flat_dir / "qa_29_0_0.json").write_text(
+                json.dumps(_valid_flat_payload("timing")),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                pre_banger_qa_dir=pre_banger_dir,
+                interval_indexes="40-49",
+            )
+
+            write_final_pre_banger_qa(args)
+
+            final_path = pre_banger_dir / "final_qa_intervals_40-49.json"
+            self.assertEqual(final_pre_banger_qa_path(args), final_path)
+            self.assertTrue(final_path.exists())
+            self.assertFalse((pre_banger_dir / "final_qa.json").exists())
 
     def test_training_export_flattens_shapes_and_drops_seed_metadata(self) -> None:
         rows = training_rows_from_final_questions(
@@ -264,17 +352,18 @@ def _pair(
     }
 
 
-def _valid_flat_payload() -> dict:
+def _valid_flat_payload(qa_type: str = "curiosity") -> dict:
+    category = f"pre_banger_{qa_type}"
     return {
-        "qa_type": "curiosity",
+        "qa_type": qa_type,
         "seed_id": "29_0_0",
         "banger_timestamp": 100.0,
         "target_banger": {"suggestion": "hidden"},
         "context_events": [_context_event()],
         "qa_pairs": [
-            _pair(0, "What would the user be curious to see right now?", "pre_banger_curiosity"),
-            _pair(1, "Is now a good moment for the assistant to help?", "pre_banger_curiosity"),
-            _pair(2, "What would the user likely do without help?", "pre_banger_curiosity"),
+            _pair(0, "What would the user be curious to see right now?", category),
+            _pair(1, "Is now a good moment for the assistant to help?", category),
+            _pair(2, "What would the user likely do without help?", category),
         ],
     }
 

@@ -364,6 +364,19 @@ Run all built-in QA types for the top prompt-ranked seeds:
 uv run scripts/run_pre_banger_qa.py --provider codex --limit 10 --qa-types all --jobs 2
 ```
 
+Shard by source interval, similar to pipeline `10`:
+
+```bash
+uv run scripts/run_pre_banger_qa.py --provider codex --interval-indexes 40-49 --qa-types timing,curiosity --jobs 2
+```
+
+When `--interval-indexes` is supplied, pipeline `20` keeps only banger seeds
+whose `banger_timestamp` falls inside the selected interval rows. The default
+ranking file is also interval-specific, such as
+`seed_rankings_intervals_40-49.json`, and the final aggregate is
+`final_qa_intervals_40-49.json`, so interval shards can run in parallel without
+sharing one ranking or final output.
+
 Run a smaller focused pass:
 
 ```bash
@@ -390,6 +403,14 @@ Export training-visible rows:
 uv run scripts/export_training_questions.py \
   --input discovery_codex_15m/20_pre_banger_qa/final_qa.json \
   --output discovery_codex_15m/20_pre_banger_qa/training_questions.jsonl
+```
+
+For interval shards, point export at the interval-specific final file:
+
+```bash
+uv run scripts/export_training_questions.py \
+  --input discovery_codex_15m/20_pre_banger_qa/final_qa_intervals_40-49.json \
+  --output discovery_codex_15m/20_pre_banger_qa/training_questions_intervals_40-49.jsonl
 ```
 
 ## Common Options

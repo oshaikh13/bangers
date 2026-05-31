@@ -12,7 +12,7 @@ from typing import Any
 
 from .cli import add_claude_args, add_codex_args
 from .intervals import parse_interval_indexes
-from .io import append_jsonl
+from .io import append_jsonl, read_jsonl
 from .paths import (
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_PRE_BANGER_QA_COMMON_TEMPLATE,
@@ -20,6 +20,7 @@ from .paths import (
     DEFAULT_PRE_BANGER_SEED_FILTER_TEMPLATE,
     REPO_ROOT,
     default_discovery_dir,
+    default_intervals_path,
 )
 from .process import run_command
 from .prompts import (
@@ -101,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Interval size used to derive the default discovery directory.",
     )
     parser.add_argument(
+        "--intervals",
+        type=Path,
+        help="Input JSONL of interval rows. Defaults to data/log_intervals_<minutes>m.jsonl.",
+    )
+    parser.add_argument(
         "--repo-root",
         default=str(REPO_ROOT),
         help="Working repository passed to the agent CLI.",
@@ -169,6 +175,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--combined-indexes",
         help="Comma-separated combined banger input indexes or ranges to include.",
+    )
+    parser.add_argument(
+        "--interval-indexes",
+        help=(
+            "Comma-separated interval indexes or ranges to include. A seed is "
+            "included when its banger_timestamp falls inside one of these intervals."
+        ),
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset after ranking.")
     parser.add_argument("--limit", type=int, help="Maximum number of ranked seeds to run.")
@@ -255,8 +268,25 @@ def parse_seed_ids(raw: str | None) -> set[str] | None:
     return seed_ids
 
 
+def interval_indexes_slug(raw: str) -> str:
+    return (
+        raw.strip()
+        .replace(",", "_")
+        .replace("-", "-")
+        .replace(" ", "")
+        or "selected"
+    )
+
+
+def default_seed_filter_path(pre_banger_qa_dir: Path, interval_indexes: str | None) -> Path:
+    if interval_indexes:
+        return pre_banger_qa_dir / f"seed_rankings_intervals_{interval_indexes_slug(interval_indexes)}.json"
+    return pre_banger_qa_dir / "seed_rankings.json"
+
+
 def normalize_args(args: argparse.Namespace) -> None:
     interval_minutes = args.interval_minutes or DEFAULT_INTERVAL_MINUTES
+    seed_filter_path_was_explicit = args.seed_filter_path is not None
     if interval_minutes <= 0:
         raise SystemExit("--interval-minutes must be greater than 0")
     if args.jobs <= 0:
@@ -269,6 +299,11 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--startup-progress-every must be non-negative")
 
     args.repo_root = Path(args.repo_root).resolve()
+    args.intervals = (
+        Path(args.intervals)
+        if args.intervals is not None
+        else default_intervals_path(interval_minutes)
+    ).resolve()
     args.discovery_dir = (
         Path(args.discovery_dir)
         if args.discovery_dir
@@ -291,9 +326,10 @@ def normalize_args(args: argparse.Namespace) -> None:
     args.seed_filter_template = Path(args.seed_filter_template).resolve()
     args.seed_filter_path = (
         Path(args.seed_filter_path)
-        if args.seed_filter_path
-        else args.pre_banger_qa_dir / "seed_rankings.json"
+        if seed_filter_path_was_explicit
+        else default_seed_filter_path(args.pre_banger_qa_dir, args.interval_indexes)
     ).resolve()
+    args.seed_filter_path_was_explicit = seed_filter_path_was_explicit
     args.prompts_dir = Path(args.prompts_dir).resolve()
     args.qa_types = parse_qa_types(args.qa_types)
     args.seed_ids = parse_seed_ids(args.seed_ids)
@@ -393,6 +429,76 @@ def load_seed_candidates(bangers_dir: Path) -> list[dict[str, Any]]:
                     }
                     seeds.append(seed)
     return seeds
+
+
+def load_interval_filter_rows(args: argparse.Namespace) -> list[dict[str, Any]] | None:
+    selected_indexes = parse_interval_indexes(args.interval_indexes)
+    if selected_indexes is None:
+        return None
+    if not args.intervals.exists():
+        raise SystemExit(f"interval JSONL not found: {args.intervals}")
+
+    rows = [
+        row
+        for row in read_jsonl(args.intervals)
+        if isinstance(row.get("interval_index"), int)
+        and row["interval_index"] in selected_indexes
+    ]
+    if not rows:
+        print("no interval rows selected", file=sys.stderr)
+    return rows
+
+
+def interval_bounds(row: dict[str, Any]) -> tuple[float, float]:
+    start_ts = parse_timestamp(row.get("start_ts"))
+    if start_ts is None:
+        start_ts = parse_timestamp(row.get("start_utc") or row.get("start_local"))
+    end_ts = parse_timestamp(row.get("end_ts"))
+    if end_ts is None:
+        end_ts = parse_timestamp(row.get("end_utc") or row.get("end_local"))
+    if start_ts is None or end_ts is None:
+        raise RuntimeError(f"could not parse interval bounds: {row}")
+    return start_ts, end_ts
+
+
+def seed_in_interval_rows(seed: dict[str, Any], rows: list[dict[str, Any]]) -> bool:
+    seed_ts = parse_timestamp(seed.get("banger_timestamp"))
+    if seed_ts is None:
+        return False
+    for row in rows:
+        start_ts, end_ts = interval_bounds(row)
+        if start_ts <= seed_ts <= end_ts:
+            return True
+    return False
+
+
+def filter_seeds_by_interval_rows(
+    seeds: list[dict[str, Any]],
+    rows: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    if rows is None:
+        return seeds
+    return [seed for seed in seeds if seed_in_interval_rows(seed, rows)]
+
+
+def select_seed_candidates_for_ranking(
+    args: argparse.Namespace,
+    seeds: list[dict[str, Any]],
+    interval_rows: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    selected = filter_seeds_by_interval_rows(seeds, interval_rows)
+    if args.seed_ids is not None:
+        selected = [seed for seed in selected if seed.get("seed_id") in args.seed_ids]
+
+    parsed_combined_indexes = parse_interval_indexes(args.combined_indexes)
+    if parsed_combined_indexes is not None:
+        selected = [
+            seed
+            for seed in selected
+            if isinstance(seed.get("combined_index"), int)
+            and seed["combined_index"] in parsed_combined_indexes
+        ]
+    return selected
 
 
 def seed_filter_path(args: argparse.Namespace) -> Path:
@@ -644,8 +750,12 @@ def run_seed_filter_once(
     )
 
 
-def select_filtered_seeds(args: argparse.Namespace, filtered: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    selected = filtered
+def select_filtered_seeds(
+    args: argparse.Namespace,
+    filtered: list[dict[str, Any]],
+    interval_rows: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    selected = filter_seeds_by_interval_rows(filtered, interval_rows)
     if args.seed_ids is not None:
         selected = [seed for seed in selected if seed.get("seed_id") in args.seed_ids]
 
@@ -1087,6 +1197,13 @@ def remove_stale_final_if_needed(path: Path) -> None:
         path.unlink()
 
 
+def final_pre_banger_qa_path(args: argparse.Namespace) -> Path:
+    interval_indexes = getattr(args, "interval_indexes", None)
+    if interval_indexes:
+        return args.pre_banger_qa_dir / f"final_qa_intervals_{interval_indexes_slug(interval_indexes)}.json"
+    return args.pre_banger_qa_dir / "final_qa.json"
+
+
 def write_final_pre_banger_qa(args: argparse.Namespace) -> None:
     final_items: list[dict[str, Any]] = []
     for qa_type, seed_id, path in iter_pre_banger_qa_files(args.pre_banger_qa_dir):
@@ -1105,7 +1222,7 @@ def write_final_pre_banger_qa(args: argparse.Namespace) -> None:
             }
         )
 
-    final_path = args.pre_banger_qa_dir / "final_qa.json"
+    final_path = final_pre_banger_qa_path(args)
     if not final_items:
         remove_stale_final_if_needed(final_path)
         print(
@@ -1133,10 +1250,19 @@ def run(args: argparse.Namespace) -> int:
     all_seeds = load_seed_candidates(args.bangers_dir)
     if not all_seeds:
         raise SystemExit(f"no banger seeds found in {args.bangers_dir}")
+    interval_rows = load_interval_filter_rows(args)
+    ranking_candidates = select_seed_candidates_for_ranking(
+        args,
+        all_seeds,
+        interval_rows,
+    )
+    if not ranking_candidates:
+        print("no pre-banger seed candidates selected for ranking", file=sys.stderr)
+        return 0
 
     seed_filter_template = load_seed_filter_template(args)
     if args.dry_run and (args.force_seed_filter or not seed_filter_path(args).exists()):
-        print_seed_filter_dry_run(args, seed_filter_template, all_seeds)
+        print_seed_filter_dry_run(args, seed_filter_template, ranking_candidates)
         return 0
 
     ranked: list[dict[str, Any]] | None = None
@@ -1155,7 +1281,7 @@ def run(args: argparse.Namespace) -> int:
             needs_seed_ranking = True
 
     if needs_seed_ranking:
-        result = run_seed_filter_once(args, seed_filter_template, all_seeds)
+        result = run_seed_filter_once(args, seed_filter_template, ranking_candidates)
         append_jsonl(args.run_log, result.record)
         if result.returncode != 0:
             print(
@@ -1175,7 +1301,7 @@ def run(args: argparse.Namespace) -> int:
 
     if ranked is None:
         ranked = load_seed_filter(seed_filter_path(args), all_seeds)
-    seeds = select_filtered_seeds(args, ranked)
+    seeds = select_filtered_seeds(args, ranked, interval_rows)
     if not seeds:
         print("no pre-banger seeds selected", file=sys.stderr)
         return 0
@@ -1193,6 +1319,12 @@ def run(args: argparse.Namespace) -> int:
     ]
 
     print(f"candidate pre-banger seeds: {len(all_seeds)}", file=sys.stderr)
+    if interval_rows is not None:
+        print(f"selected intervals: {len(interval_rows)}", file=sys.stderr)
+        print(
+            f"interval-scoped seed candidates: {len(ranking_candidates)}",
+            file=sys.stderr,
+        )
     print(f"prompt-ranked pre-banger seeds: {len(ranked)}", file=sys.stderr)
     print(f"selected pre-banger seeds: {len(seeds)}", file=sys.stderr)
     print(f"selected pre-banger QA runs: {len(selected)}", file=sys.stderr)
