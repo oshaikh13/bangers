@@ -149,7 +149,7 @@ class PreBangerQATests(unittest.TestCase):
                 "end_ts": 1775666324.439826,
             }
         ]
-        args = SimpleNamespace(seed_ids=None, combined_indexes=None, start=0, limit=None)
+        args = SimpleNamespace(seed_ids=None, banger_input_indexes=None, start=0, limit=None)
 
         selected = select_seed_candidates_for_ranking(args, seeds, interval_rows)
 
@@ -182,7 +182,7 @@ class PreBangerQATests(unittest.TestCase):
         ]
         args = SimpleNamespace(
             seed_ids=None,
-            combined_indexes=None,
+            banger_input_indexes=None,
             start=1,
             limit=1,
         )

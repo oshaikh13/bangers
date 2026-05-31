@@ -100,11 +100,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated interval indexes or ranges to run, e.g. `0,3,10-12`.",
     )
     parser.add_argument(
-        "--combined-indexes",
+        "--banger-input-indexes",
+        dest="banger_input_indexes",
         help=(
             "With --bangers or --questions, comma-separated zero-based "
-            "banger input indexes or ranges to run, e.g. `0,3,10-12`. "
-            "When 02c_suggestion_inputs exists, these index that file."
+            "indexes or ranges in 02c_suggestion_inputs/inputs.json to run, "
+            "e.g. `0,3,10-12`."
+        ),
+    )
+    parser.add_argument(
+        "--combined-indexes",
+        dest="banger_input_indexes",
+        help=(
+            "Deprecated alias for --banger-input-indexes."
         ),
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
@@ -323,11 +331,11 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--startup-progress-every must be non-negative")
     if (args.questions or args.bangers) and args.interval_indexes:
         raise SystemExit(
-            "--interval-indexes selects discovery intervals; use --combined-indexes "
+            "--interval-indexes selects discovery intervals; use --banger-input-indexes "
             "with --bangers or --questions"
         )
-    if args.combined_indexes and not (args.questions or args.bangers):
-        raise SystemExit("--combined-indexes requires --bangers or --questions")
+    if args.banger_input_indexes and not (args.questions or args.bangers):
+        raise SystemExit("--banger-input-indexes requires --bangers or --questions")
 
     args.repo_root = Path(args.repo_root).resolve()
     if args.questions:

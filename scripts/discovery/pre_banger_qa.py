@@ -6,10 +6,10 @@ import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_job import cleanup_isolated_workdir, run_agent_job
 from .cli import add_claude_args, add_codex_args
 from .intervals import parse_interval_indexes
 from .io import append_jsonl, read_jsonl
@@ -22,13 +22,13 @@ from .paths import (
     default_discovery_dir,
     default_intervals_path,
 )
-from .process import run_command
 from .prompts import (
     load_template,
     render_pre_banger_qa_prompt,
     render_pre_banger_seed_filter_prompt,
 )
 from .providers import build_provider_command
+from .qa_validation import valid_context_indexes, validate_grounded_pair
 from .question_context import (
     QUESTION_CONTEXT_EVENT_COUNT,
     context_events_for_timestamp,
@@ -36,8 +36,6 @@ from .question_context import (
     parse_timestamp,
 )
 from .runner import (
-    cleanup_isolated_workdir,
-    copy_file_atomically,
     create_isolated_workdir,
     split_bangers_batch_json,
     write_json_atomically,
@@ -54,8 +52,6 @@ QA_TYPES = (
     "threaded_mix",
 )
 THREADED_QA_TYPE = "threaded_mix"
-ANSWER_BASES = {"H", "F", "H+F"}
-TIMESCALES = {"micro", "short", "medium", "long"}
 MIN_QAS_PER_RUN = 3
 MAX_QAS_PER_RUN = 10
 THREAD_COUNT = 3
@@ -173,8 +169,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated seed ids to run, e.g. `29_0_0,25_0_0`.",
     )
     parser.add_argument(
+        "--banger-input-indexes",
+        dest="banger_input_indexes",
+        help="Comma-separated 02c banger input indexes or ranges to include.",
+    )
+    parser.add_argument(
         "--combined-indexes",
-        help="Comma-separated combined banger input indexes or ranges to include.",
+        dest="banger_input_indexes",
+        help="Deprecated alias for --banger-input-indexes.",
     )
     parser.add_argument(
         "--interval-indexes",
@@ -266,6 +268,14 @@ def parse_seed_ids(raw: str | None) -> set[str] | None:
     if not seed_ids:
         raise SystemExit("--seed-ids must not be empty")
     return seed_ids
+
+
+def banger_input_indexes_arg(args: argparse.Namespace) -> str | None:
+    return getattr(args, "banger_input_indexes", None) or getattr(
+        args,
+        "combined_indexes",
+        None,
+    )
 
 
 def interval_indexes_slug(raw: str) -> str:
@@ -490,13 +500,13 @@ def select_seed_candidates_for_ranking(
     if args.seed_ids is not None:
         selected = [seed for seed in selected if seed.get("seed_id") in args.seed_ids]
 
-    parsed_combined_indexes = parse_interval_indexes(args.combined_indexes)
-    if parsed_combined_indexes is not None:
+    parsed_banger_input_indexes = parse_interval_indexes(banger_input_indexes_arg(args))
+    if parsed_banger_input_indexes is not None:
         selected = [
             seed
             for seed in selected
             if isinstance(seed.get("combined_index"), int)
-            and seed["combined_index"] in parsed_combined_indexes
+            and seed["combined_index"] in parsed_banger_input_indexes
         ]
     return selected
 
@@ -686,42 +696,32 @@ def run_seed_filter_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_seed_filter_path(agent_workdir)
 
-    provider = build_provider_command(args, agent_workdir)
-    stdout_path = args.pre_banger_qa_dir / f"seed_filter.{provider.name}.stdout.log"
-    stderr_path = args.pre_banger_qa_dir / f"seed_filter.{provider.name}.stderr.log"
-    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_path = args.pre_banger_qa_dir / f"seed_filter.{args.provider}.stdout.log"
+    stderr_path = args.pre_banger_qa_dir / f"seed_filter.{args.provider}.stderr.log"
     prompt = render_pre_banger_seed_filter_prompt(
         template,
         all_seeds,
         agent_output_path,
-        provider.name,
+        args.provider,
     )
-    started_at = datetime.now(timezone.utc).isoformat()
+    job = run_agent_job(
+        args,
+        agent_workdir=agent_workdir,
+        isolated_workdir=isolated_workdir,
+        prompt=prompt,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        prefix=f"{args.provider}:pre-banger-seed-filter",
+        log_message=f"pre-banger seed ranking -> {output_path}",
+        output_path=output_path,
+        agent_output_path=agent_output_path,
+    )
 
-    print(f"pre-banger seed ranking -> {output_path}", file=sys.stderr)
-    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    try:
-        returncode = run_command(
-            provider.command,
-            agent_workdir,
-            prompt,
-            stdout_path,
-            stderr_path,
-            f"{provider.name}:pre-banger-seed-filter",
-        )
-        if agent_output_path.exists() and agent_output_path != output_path:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            copy_file_atomically(agent_output_path, output_path)
-    finally:
-        if isolated_workdir is not None:
-            cleanup_isolated_workdir(args, isolated_workdir)
-
-    if returncode == 0 and output_path.exists():
+    if job.returncode == 0 and output_path.exists():
         load_seed_filter(output_path, all_seeds)
 
-    completed_at = datetime.now(timezone.utc).isoformat()
     record = {
-        "provider": provider.name,
+        "provider": job.provider.name,
         "mode": "pre_banger_seed_ranking",
         "discovery_dir": str(args.discovery_dir),
         "bangers_dir": str(args.bangers_dir),
@@ -732,21 +732,21 @@ def run_seed_filter_once(
         "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
-        "stdout_path": str(stdout_path),
-        "stderr_path": str(stderr_path),
-        "returncode": returncode,
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "model": provider.model,
-        "effort": provider.effort,
-        "sandbox": provider.sandbox,
+        "stdout_path": str(job.stdout_path),
+        "stderr_path": str(job.stderr_path),
+        "returncode": job.returncode,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "model": job.provider.model,
+        "effort": job.provider.effort,
+        "sandbox": job.provider.sandbox,
     }
     return SeedFilterResult(
         record=record,
         output_path=output_path,
-        stderr_path=stderr_path,
-        returncode=returncode,
-        created_output=output_path.exists(),
+        stderr_path=job.stderr_path,
+        returncode=job.returncode,
+        created_output=job.created_output,
     )
 
 
@@ -759,13 +759,13 @@ def select_filtered_seeds(
     if args.seed_ids is not None:
         selected = [seed for seed in selected if seed.get("seed_id") in args.seed_ids]
 
-    parsed_combined_indexes = parse_interval_indexes(args.combined_indexes)
-    if parsed_combined_indexes is not None:
+    parsed_banger_input_indexes = parse_interval_indexes(banger_input_indexes_arg(args))
+    if parsed_banger_input_indexes is not None:
         selected = [
             seed
             for seed in selected
             if isinstance(seed.get("combined_index"), int)
-            and seed["combined_index"] in parsed_combined_indexes
+            and seed["combined_index"] in parsed_banger_input_indexes
         ]
 
     selected = selected[args.start :]
@@ -839,130 +839,6 @@ def normalize_pre_banger_qa_file(
     return normalized
 
 
-def _valid_context_indexes(data: dict[str, Any], path: Path | str) -> set[int]:
-    context_events = data.get("context_events")
-    if not isinstance(context_events, list):
-        raise RuntimeError(f"pre-banger QA output must include context_events: {path}")
-    if len(context_events) > QUESTION_CONTEXT_EVENT_COUNT:
-        raise RuntimeError(
-            f"pre-banger QA context_events must have at most "
-            f"{QUESTION_CONTEXT_EVENT_COUNT} events: {path}"
-        )
-
-    valid_indexes: set[int] = set()
-    for index, event in enumerate(context_events):
-        if not isinstance(event, dict):
-            raise RuntimeError(
-                f"pre-banger QA context_events[{index}] must be an object: {path}"
-            )
-        if event.get("index") != index:
-            raise RuntimeError(
-                f"pre-banger QA context_events indexes must be contiguous from 0: {path}"
-            )
-        valid_indexes.add(index)
-    return valid_indexes
-
-
-def _validate_pair(
-    pair: Any,
-    pair_index: int,
-    location: str,
-    cutoff_ts: float,
-    valid_context_indexes: set[int],
-    path: Path | str,
-) -> None:
-    if not isinstance(pair, dict):
-        raise RuntimeError(f"pre-banger QA output {location} must be an object: {path}")
-    if pair.get("q_id") != pair_index:
-        raise RuntimeError(
-            f"pre-banger QA output {location}.q_id must equal {pair_index}: {path}"
-        )
-
-    for key in (
-        "question",
-        "answer",
-        "category",
-        "timescale",
-        "answer_basis",
-        "verify_at_ts",
-        "verify_at_iso",
-        "question_basis",
-        "why_it_matters",
-        "evidence_grounding",
-        "question_difficulty",
-    ):
-        if key not in pair:
-            raise RuntimeError(f"pre-banger QA output {location} must include {key}: {path}")
-
-    for key in ("question", "answer", "category", "why_it_matters", "evidence_grounding"):
-        if not isinstance(pair.get(key), str) or not pair.get(key):
-            raise RuntimeError(
-                f"pre-banger QA output {location}.{key} must be a non-empty string: {path}"
-            )
-
-    if pair.get("timescale") not in TIMESCALES:
-        raise RuntimeError(
-            f"pre-banger QA output {location}.timescale must be one of "
-            f"{sorted(TIMESCALES)}: {path}"
-        )
-
-    answer_basis = pair.get("answer_basis")
-    if answer_basis not in ANSWER_BASES:
-        raise RuntimeError(
-            f"pre-banger QA output {location}.answer_basis must be H, F, or H+F: {path}"
-        )
-
-    verify_at_ts = parse_timestamp(pair.get("verify_at_ts"))
-    if verify_at_ts is None:
-        raise RuntimeError(
-            f"pre-banger QA output {location}.verify_at_ts must be parseable: {path}"
-        )
-    if answer_basis == "H" and verify_at_ts >= cutoff_ts:
-        raise RuntimeError(
-            f"pre-banger QA output {location}.verify_at_ts must be before "
-            f"banger_timestamp for H answers: {path}"
-        )
-    if answer_basis in {"F", "H+F"} and verify_at_ts < cutoff_ts:
-        raise RuntimeError(
-            f"pre-banger QA output {location}.verify_at_ts must be at or after "
-            f"banger_timestamp for {answer_basis} answers: {path}"
-        )
-
-    if not isinstance(pair.get("question_difficulty"), (int, float)):
-        raise RuntimeError(
-            f"pre-banger QA output {location}.question_difficulty must be a number: {path}"
-        )
-
-    question_basis = pair.get("question_basis")
-    if not isinstance(question_basis, dict):
-        raise RuntimeError(
-            f"pre-banger QA output {location}.question_basis must be an object: {path}"
-        )
-    reason = question_basis.get("reason")
-    if not isinstance(reason, str) or not reason:
-        raise RuntimeError(
-            f"pre-banger QA output {location}.question_basis.reason must be "
-            f"a non-empty string: {path}"
-        )
-    basis_indexes = question_basis.get("context_event_indexes")
-    if not isinstance(basis_indexes, list) or not basis_indexes:
-        raise RuntimeError(
-            f"pre-banger QA output {location}.question_basis.context_event_indexes "
-            f"must be a non-empty array: {path}"
-        )
-    for basis_index in basis_indexes:
-        if not isinstance(basis_index, int):
-            raise RuntimeError(
-                f"pre-banger QA output {location}.question_basis.context_event_indexes "
-                f"must contain integers: {path}"
-            )
-        if basis_index not in valid_context_indexes:
-            raise RuntimeError(
-                f"pre-banger QA output {location} references missing context "
-                f"event index {basis_index}: {path}"
-            )
-
-
 def validate_pre_banger_qa_data(data: Any, path: Path | str) -> None:
     if not isinstance(data, dict):
         raise RuntimeError(f"pre-banger QA output must be a JSON object: {path}")
@@ -975,7 +851,7 @@ def validate_pre_banger_qa_data(data: Any, path: Path | str) -> None:
     if cutoff_ts is None:
         raise RuntimeError(f"pre-banger QA output has invalid banger_timestamp: {path}")
 
-    valid_indexes = _valid_context_indexes(data, path)
+    valid_indexes = valid_context_indexes(data, path, "pre-banger QA")
 
     if qa_type == THREADED_QA_TYPE:
         threads = data.get("threads")
@@ -1005,13 +881,15 @@ def validate_pre_banger_qa_data(data: Any, path: Path | str) -> None:
                     f"entries: {path}"
                 )
             for pair_index, pair in enumerate(qa_pairs):
-                _validate_pair(
+                validate_grounded_pair(
                     pair,
                     pair_index,
                     f"threads[{thread_index}].qa_pairs[{pair_index}]",
                     cutoff_ts,
                     valid_indexes,
                     path,
+                    "pre-banger QA",
+                    "banger_timestamp",
                 )
         return
 
@@ -1025,13 +903,15 @@ def validate_pre_banger_qa_data(data: Any, path: Path | str) -> None:
         )
 
     for pair_index, pair in enumerate(qa_pairs):
-        _validate_pair(
+        validate_grounded_pair(
             pair,
             pair_index,
             f"qa_pairs[{pair_index}]",
             cutoff_ts,
             valid_indexes,
             path,
+            "pre-banger QA",
+            "banger_timestamp",
         )
 
 
@@ -1104,49 +984,39 @@ def run_pre_banger_qa_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_qa_path(agent_workdir, qa_type, seed_id)
 
-    provider = build_provider_command(args, agent_workdir)
     stdout_path = args.pre_banger_qa_dir / qa_type / (
-        f"qa_{seed_id}.{provider.name}.stdout.log"
+        f"qa_{seed_id}.{args.provider}.stdout.log"
     )
     stderr_path = args.pre_banger_qa_dir / qa_type / (
-        f"qa_{seed_id}.{provider.name}.stderr.log"
+        f"qa_{seed_id}.{args.provider}.stderr.log"
     )
-    stdout_path.parent.mkdir(parents=True, exist_ok=True)
     prompt = render_pre_banger_qa_prompt(
         template,
         qa_type,
         seed,
         context_events,
         agent_output_path,
-        provider.name,
+        args.provider,
         args.pairs_per_run,
     )
-    started_at = datetime.now(timezone.utc).isoformat()
+    job = run_agent_job(
+        args,
+        agent_workdir=agent_workdir,
+        isolated_workdir=isolated_workdir,
+        prompt=prompt,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        prefix=f"{args.provider}:pre-banger-qa:{qa_type}:{seed_id}",
+        log_message=f"pre-banger QA {qa_type} seed {seed_id} -> {output_path}",
+        output_path=output_path,
+        agent_output_path=agent_output_path,
+    )
 
-    print(f"pre-banger QA {qa_type} seed {seed_id} -> {output_path}", file=sys.stderr)
-    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    try:
-        returncode = run_command(
-            provider.command,
-            agent_workdir,
-            prompt,
-            stdout_path,
-            stderr_path,
-            f"{provider.name}:pre-banger-qa:{qa_type}:{seed_id}",
-        )
-        if agent_output_path.exists() and agent_output_path != output_path:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            copy_file_atomically(agent_output_path, output_path)
-    finally:
-        if isolated_workdir is not None:
-            cleanup_isolated_workdir(args, isolated_workdir)
-
-    if returncode == 0 and output_path.exists():
+    if job.returncode == 0 and output_path.exists():
         normalize_pre_banger_qa_file(output_path, qa_type, seed, context_events)
 
-    completed_at = datetime.now(timezone.utc).isoformat()
     record = {
-        "provider": provider.name,
+        "provider": job.provider.name,
         "mode": "pre_banger_qa",
         "qa_type": qa_type,
         "seed_id": seed_id,
@@ -1159,23 +1029,23 @@ def run_pre_banger_qa_once(
         "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
-        "stdout_path": str(stdout_path),
-        "stderr_path": str(stderr_path),
-        "returncode": returncode,
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "model": provider.model,
-        "effort": provider.effort,
-        "sandbox": provider.sandbox,
+        "stdout_path": str(job.stdout_path),
+        "stderr_path": str(job.stderr_path),
+        "returncode": job.returncode,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "model": job.provider.model,
+        "effort": job.provider.effort,
+        "sandbox": job.provider.sandbox,
     }
     return PreBangerQAResult(
         qa_type=qa_type,
         seed_id=seed_id,
         record=record,
         qa_path=output_path,
-        stderr_path=stderr_path,
-        returncode=returncode,
-        created_qa=output_path.exists(),
+        stderr_path=job.stderr_path,
+        returncode=job.returncode,
+        created_qa=job.created_output,
     )
 
 
@@ -1186,7 +1056,7 @@ def iter_pre_banger_qa_files(pre_banger_qa_dir: Path) -> list[tuple[str, str, Pa
         if not type_dir.is_dir():
             continue
         for path in sorted(type_dir.glob("qa_*.json")):
-            seed_id = path.stem.removeprefix("qa_")
+            seed_id = path.stem[len("qa_") :]
             files.append((qa_type, seed_id, path))
     files.sort(key=lambda item: (item[1], item[0]))
     return files

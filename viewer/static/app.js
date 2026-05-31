@@ -471,7 +471,7 @@ async function renderGenericQaTab() {
   itemList.innerHTML = "";
 
   if (!manifest.stages.generic_qa || items.length === 0) {
-    detailContent.innerHTML = `<p class="empty-state">No generic QA files found for this run. Generate with <code>uv run scripts/run_generic_qa.py</code>.</p>`;
+    detailContent.innerHTML = `<p class="empty-state">No generic QA files found for this run. Generate with <code>uv run scripts/runners/run_generic_qa.py</code>.</p>`;
     return;
   }
 
