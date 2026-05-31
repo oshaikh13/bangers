@@ -74,7 +74,7 @@ class QuestionContextTests(unittest.TestCase):
 
     def test_validate_questions_rejects_missing_context_basis(self) -> None:
         data = _valid_questions_payload()
-        data["qa_pairs"][0]["question_basis"]["context_event_indexes"] = [3]
+        data["threads"][0]["qa_pairs"][0]["question_basis"]["context_event_indexes"] = [3]
 
         with self.assertRaisesRegex(RuntimeError, "references missing context event index"):
             validate_questions_data(data, "question.json")
@@ -122,16 +122,37 @@ class QuestionContextTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(set(rows[0].keys()), {"context_events", "question", "answer"})
+        self.assertEqual(len(rows), 9)
+        self.assertEqual(
+            set(rows[0].keys()),
+            {"context_events", "thread_id", "q_id", "question", "answer"},
+        )
         self.assertNotIn("why_it_matters", rows[0])
         self.assertEqual(
             set(rows[0]["context_events"][0].keys()),
             {"index", "ts", "ts_iso", "connector", "text"},
         )
+        self.assertEqual(rows[0]["thread_id"], 0)
+        self.assertEqual(rows[0]["q_id"], 0)
+        self.assertEqual(rows[-1]["thread_id"], 2)
+        self.assertEqual(rows[-1]["q_id"], 2)
 
 
 def _valid_questions_payload() -> dict:
+    def _pair(q_id: int) -> dict:
+        return {
+            "q_id": q_id,
+            "question": f"What is the user trying to get done right now? ({q_id})",
+            "answer": "The user is trying to make a checklist.",
+            "question_basis": {
+                "context_event_indexes": [0],
+                "reason": "The event shows the current workflow.",
+            },
+            "why_it_matters": "It keeps the banger focused.",
+            "evidence_grounding": "No future evidence was needed for this answer.",
+            "question_difficulty": 2,
+        }
+
     return {
         "suggestion_title": "Make a checklist",
         "banger_timestamp": "2026-01-01T00:00:01Z",
@@ -144,19 +165,9 @@ def _valid_questions_payload() -> dict:
                 "text": "event",
             }
         ],
-        "qa_pairs": [
-            {
-                "question": "What is the user trying to get done right now?",
-                "answer": "The user is trying to make a checklist.",
-                "banger_dimension": "goal_clarity",
-                "question_basis": {
-                    "context_event_indexes": [0],
-                    "reason": "The event shows the current workflow.",
-                },
-                "why_it_matters": "It keeps the banger focused.",
-                "evidence_grounding": "No future evidence was needed for this answer.",
-                "question_difficulty": 2,
-            }
+        "threads": [
+            {"thread_id": thread_id, "qa_pairs": [_pair(0), _pair(1), _pair(2)]}
+            for thread_id in range(3)
         ],
     }
 

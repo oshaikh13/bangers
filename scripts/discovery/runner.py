@@ -29,7 +29,10 @@ from .prompts import (
     render_questions_prompt,
 )
 from .question_context import (
+    MAX_QAS_PER_THREAD,
+    MIN_QAS_PER_THREAD,
     QUESTION_CONTEXT_EVENT_COUNT,
+    THREAD_COUNT,
     context_events_for_timestamp,
     load_indexed_events,
 )
@@ -426,75 +429,107 @@ def validate_questions_data(data: Any, path: Path | str) -> None:
             )
         valid_context_indexes.add(index)
 
-    if "qa_pairs" not in data:
-        raise RuntimeError(f"questions output must include qa_pairs: {path}")
-    if not isinstance(data["qa_pairs"], list):
-        raise RuntimeError(f"questions output qa_pairs must be an array: {path}")
-    for index, pair in enumerate(data["qa_pairs"]):
-        if not isinstance(pair, dict):
+    if "threads" not in data:
+        raise RuntimeError(f"questions output must include threads: {path}")
+    threads = data["threads"]
+    if not isinstance(threads, list):
+        raise RuntimeError(f"questions output threads must be an array: {path}")
+    if len(threads) != THREAD_COUNT:
+        raise RuntimeError(
+            f"questions output threads must contain exactly {THREAD_COUNT} "
+            f"entries, got {len(threads)}: {path}"
+        )
+    for thread_index, thread in enumerate(threads):
+        if not isinstance(thread, dict):
             raise RuntimeError(
-                f"questions output qa_pairs[{index}] must be an object: {path}"
+                f"questions output threads[{thread_index}] must be an object: {path}"
             )
-        for key in (
-            "question",
-            "answer",
-            "banger_dimension",
-            "question_basis",
-            "why_it_matters",
-            "evidence_grounding",
-            "question_difficulty",
-        ):
-            if key not in pair:
+        if thread.get("thread_id") != thread_index:
+            raise RuntimeError(
+                f"questions output threads[{thread_index}].thread_id must equal "
+                f"{thread_index}: {path}"
+            )
+        qa_pairs = thread.get("qa_pairs")
+        if not isinstance(qa_pairs, list):
+            raise RuntimeError(
+                f"questions output threads[{thread_index}].qa_pairs must be an "
+                f"array: {path}"
+            )
+        if not (MIN_QAS_PER_THREAD <= len(qa_pairs) <= MAX_QAS_PER_THREAD):
+            raise RuntimeError(
+                f"questions output threads[{thread_index}].qa_pairs must contain "
+                f"{MIN_QAS_PER_THREAD}-{MAX_QAS_PER_THREAD} entries, got "
+                f"{len(qa_pairs)}: {path}"
+            )
+        for pair_index, pair in enumerate(qa_pairs):
+            location = f"threads[{thread_index}].qa_pairs[{pair_index}]"
+            if not isinstance(pair, dict):
                 raise RuntimeError(
-                    f"questions output qa_pairs[{index}] must include {key}: {path}"
+                    f"questions output {location} must be an object: {path}"
                 )
-        for key in (
-            "question",
-            "answer",
-            "banger_dimension",
-            "why_it_matters",
-            "evidence_grounding",
-        ):
-            if not isinstance(pair.get(key), str) or not pair.get(key):
+            if pair.get("q_id") != pair_index:
                 raise RuntimeError(
-                    f"questions output qa_pairs[{index}].{key} must be a "
-                    f"non-empty string: {path}"
+                    f"questions output {location}.q_id must equal "
+                    f"{pair_index}: {path}"
                 )
-        if not isinstance(pair.get("question_difficulty"), (int, float)):
-            raise RuntimeError(
-                f"questions output qa_pairs[{index}].question_difficulty must "
-                f"be a number: {path}"
-            )
-        question_basis = pair.get("question_basis")
-        if not isinstance(question_basis, dict):
-            raise RuntimeError(
-                f"questions output qa_pairs[{index}].question_basis must be "
-                f"an object: {path}"
-            )
-        if not isinstance(question_basis.get("reason"), str) or not question_basis.get(
-            "reason"
-        ):
-            raise RuntimeError(
-                f"questions output qa_pairs[{index}].question_basis.reason "
-                f"must be a non-empty string: {path}"
-            )
-        basis_indexes = question_basis.get("context_event_indexes")
-        if not isinstance(basis_indexes, list) or not basis_indexes:
-            raise RuntimeError(
-                f"questions output qa_pairs[{index}].question_basis."
-                f"context_event_indexes must be a non-empty array: {path}"
-            )
-        for basis_index in basis_indexes:
-            if not isinstance(basis_index, int):
+            for key in (
+                "question",
+                "answer",
+                "question_basis",
+                "why_it_matters",
+                "evidence_grounding",
+                "question_difficulty",
+            ):
+                if key not in pair:
+                    raise RuntimeError(
+                        f"questions output {location} must include {key}: {path}"
+                    )
+            for key in (
+                "question",
+                "answer",
+                "why_it_matters",
+                "evidence_grounding",
+            ):
+                if not isinstance(pair.get(key), str) or not pair.get(key):
+                    raise RuntimeError(
+                        f"questions output {location}.{key} must be a "
+                        f"non-empty string: {path}"
+                    )
+            if not isinstance(pair.get("question_difficulty"), (int, float)):
                 raise RuntimeError(
-                    f"questions output qa_pairs[{index}].question_basis."
-                    f"context_event_indexes must contain integers: {path}"
+                    f"questions output {location}.question_difficulty must "
+                    f"be a number: {path}"
                 )
-            if basis_index not in valid_context_indexes:
+            question_basis = pair.get("question_basis")
+            if not isinstance(question_basis, dict):
                 raise RuntimeError(
-                    f"questions output qa_pairs[{index}] references missing "
-                    f"context event index {basis_index}: {path}"
+                    f"questions output {location}.question_basis must be "
+                    f"an object: {path}"
                 )
+            if not isinstance(question_basis.get("reason"), str) or not (
+                question_basis.get("reason")
+            ):
+                raise RuntimeError(
+                    f"questions output {location}.question_basis.reason "
+                    f"must be a non-empty string: {path}"
+                )
+            basis_indexes = question_basis.get("context_event_indexes")
+            if not isinstance(basis_indexes, list) or not basis_indexes:
+                raise RuntimeError(
+                    f"questions output {location}.question_basis."
+                    f"context_event_indexes must be a non-empty array: {path}"
+                )
+            for basis_index in basis_indexes:
+                if not isinstance(basis_index, int):
+                    raise RuntimeError(
+                        f"questions output {location}.question_basis."
+                        f"context_event_indexes must contain integers: {path}"
+                    )
+                if basis_index not in valid_context_indexes:
+                    raise RuntimeError(
+                        f"questions output {location} references missing "
+                        f"context event index {basis_index}: {path}"
+                    )
 
 
 def print_combine_dry_run(args: argparse.Namespace, template: str) -> None:

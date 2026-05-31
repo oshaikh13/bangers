@@ -133,3 +133,37 @@ def render_questions_prompt(
         + str(questions_path)
         + "\n"
     )
+
+
+def render_generic_qa_prompt(
+    template: str,
+    qa_type: str,
+    interval: dict[str, Any],
+    context_events: list[dict[str, Any]],
+    qa_path: Path,
+    provider: str,
+    pairs_per_run: int,
+) -> str:
+    timestamp_ts = interval.get("end_ts")
+    timestamp_iso = interval.get("end_utc") or interval.get("end_local") or timestamp_ts
+    rendered = (
+        template.replace("{qa_type}", qa_type)
+        .replace("{qa_timestamp}", str(timestamp_iso))
+        .replace("{qa_timestamp_ts}", str(timestamp_ts))
+        .replace(
+            "{interval_json}",
+            json.dumps(interval, ensure_ascii=False, sort_keys=True),
+        )
+        .replace(
+            "{context_events_json}",
+            json.dumps(context_events, ensure_ascii=False, sort_keys=True),
+        )
+        .replace("{pairs_per_run}", str(pairs_per_run))
+    )
+    return (
+        rendered
+        + "\n\n"
+        + f"For this {provider} run, write the JSON file to this exact path: "
+        + str(qa_path)
+        + "\n"
+    )

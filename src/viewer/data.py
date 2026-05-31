@@ -2,20 +2,31 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+_SCRIPTS_DIR = REPO_ROOT / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
 GOAL_PATTERN = re.compile(r"^goal_(\d+)\.json$")
 BANGER_PATTERN = re.compile(r"^banger_(\d+)\.json$")
 BANGERS_PATTERN = re.compile(r"^bangers_(\d+)_(\d+)\.json$")
 QUESTION_PATTERN = re.compile(r"^question_(.+)\.json$")
+GENERIC_QA_DIR = "10_generic_qa"
+GENERIC_QA_FILE_PATTERN = re.compile(r"^qa_(\d+)\.json$")
+GENERIC_QA_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+LOGS_INDEXED_DIR = REPO_ROOT / "logs-indexed"
 COMBINED_RELATIVE_PATHS = (
     "02a_combined/combined.json",
     "02_combined/combined.json",
 )
+
+_INDEXED_EVENTS_CACHE: list[dict[str, Any]] | None = None
 
 
 def resolve_combined_path(run_path: Path) -> Path | None:
@@ -35,6 +46,7 @@ class RunInfo:
     has_combined: bool
     has_bangers: bool
     has_questions: bool
+    has_generic_qa: bool
 
 
 def list_discovery_runs(repo_root: Path = REPO_ROOT) -> list[RunInfo]:
@@ -76,6 +88,7 @@ def describe_run(path: Path) -> RunInfo:
     goals_dir = path / "01_goals"
     bangers_dir = path / "03_bangers"
     questions_dir = path / "04_questions"
+    generic_qa_dir = path / GENERIC_QA_DIR
     final_questions = questions_dir / "final_questions.json"
     goal_count = 0
     if goals_dir.is_dir():
@@ -83,6 +96,9 @@ def describe_run(path: Path) -> RunInfo:
             goal_count = len(load_all_goals(path))
         except (ValueError, OSError):
             goal_count = len(list_goal_intervals(path))
+    has_generic_qa = generic_qa_dir.is_dir() and any(
+        generic_qa_dir.glob("*/qa_*.json")
+    )
     return RunInfo(
         name=path.name,
         path=path,
@@ -94,6 +110,7 @@ def describe_run(path: Path) -> RunInfo:
         has_questions=final_questions.is_file() or any(
             questions_dir.glob("question_*.json")
         ),
+        has_generic_qa=has_generic_qa,
     )
 
 
@@ -280,6 +297,7 @@ def build_manifest(run_path: Path) -> dict[str, Any]:
     bangers = list_banger_indexes(run_path) if run.has_bangers else []
     questions = list_questions(run_path) if run.has_questions else []
     goals = list_goal_intervals(run_path) if run.has_goals else []
+    generic_qa = list_generic_qa_items(run_path) if run.has_generic_qa else []
 
     combined_items = [
         {
@@ -310,17 +328,20 @@ def build_manifest(run_path: Path) -> dict[str, Any]:
             "combined": run.has_combined,
             "bangers": run.has_bangers,
             "questions": run.has_questions,
+            "generic_qa": run.has_generic_qa,
         },
         "counts": {
             "goals": len(goals),
             "combined": len(combined_items),
             "bangers": len(bangers),
             "questions": len(questions),
+            "generic_qa": len(generic_qa),
         },
         "goals": goals,
         "combined": combined_items,
         "bangers": bangers,
         "questions": questions,
+        "generic_qa": generic_qa,
     }
 
 
@@ -345,3 +366,119 @@ def _suggestion_title_from_questions(data: Any) -> str | None:
         if title:
             return str(title)
     return None
+
+
+def _generic_qa_pairs(data: Any) -> list[Any]:
+    """Return qa_pairs from either the flat or legacy threaded shape."""
+    if not isinstance(data, dict):
+        return []
+    flat = data.get("qa_pairs")
+    if isinstance(flat, list):
+        return flat
+    collected: list[Any] = []
+    threads = data.get("threads")
+    if isinstance(threads, list):
+        for thread in threads:
+            if isinstance(thread, dict):
+                pairs = thread.get("qa_pairs")
+                if isinstance(pairs, list):
+                    collected.extend(pairs)
+    return collected
+
+
+def list_generic_qa_items(run_path: Path) -> list[dict[str, Any]]:
+    base = run_path / GENERIC_QA_DIR
+    if not base.is_dir():
+        return []
+    items: list[dict[str, Any]] = []
+    for qa_type_dir in sorted(base.iterdir()):
+        if not qa_type_dir.is_dir() or not GENERIC_QA_TYPE_PATTERN.match(qa_type_dir.name):
+            continue
+        qa_type = qa_type_dir.name
+        for path in sorted(qa_type_dir.glob("qa_*.json")):
+            match = GENERIC_QA_FILE_PATTERN.match(path.name)
+            if not match:
+                continue
+            interval = int(match.group(1))
+            try:
+                data = load_json(path)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            qa_timestamp = data.get("qa_timestamp")
+            qa_timestamp_ts = data.get("qa_timestamp_ts")
+            if not isinstance(qa_timestamp_ts, (int, float)):
+                qa_timestamp_ts = None
+            pair_count = 0
+            sample_question: str | None = None
+            pairs = _generic_qa_pairs(data)
+            pair_count = len(pairs)
+            for pair in pairs:
+                if isinstance(pair, dict):
+                    text = pair.get("question")
+                    if isinstance(text, str) and text:
+                        sample_question = text
+                        break
+            items.append(
+                {
+                    "qa_type": qa_type,
+                    "interval_index": interval,
+                    "qa_timestamp": qa_timestamp,
+                    "qa_timestamp_ts": qa_timestamp_ts,
+                    "pair_count": pair_count,
+                    "sample_question": sample_question,
+                }
+            )
+    items.sort(
+        key=lambda item: (
+            item["qa_timestamp_ts"] if item["qa_timestamp_ts"] is not None else float("inf"),
+            item["qa_type"],
+            item["interval_index"],
+        )
+    )
+    return items
+
+
+def load_generic_qa(run_path: Path, qa_type: str, interval: int) -> dict[str, Any]:
+    if not GENERIC_QA_TYPE_PATTERN.match(qa_type or ""):
+        raise FileNotFoundError(f"invalid qa_type: {qa_type!r}")
+    path = run_path / GENERIC_QA_DIR / qa_type / f"qa_{interval}.json"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"generic qa file not found: {qa_type}/qa_{interval}.json"
+        )
+    data = load_json(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"expected object in {path.name}")
+    return data
+
+
+def _indexed_events() -> list[dict[str, Any]]:
+    global _INDEXED_EVENTS_CACHE
+    if _INDEXED_EVENTS_CACHE is None:
+        from discovery.question_context import load_indexed_events
+
+        _INDEXED_EVENTS_CACHE = load_indexed_events(LOGS_INDEXED_DIR)
+    return _INDEXED_EVENTS_CACHE
+
+
+def load_logs_window(
+    center_ts: float,
+    before: int = 200,
+    after: int = 200,
+) -> dict[str, Any]:
+    events = _indexed_events()
+    past = [event for event in events if float(event["ts"]) <= center_ts]
+    future = [event for event in events if float(event["ts"]) > center_ts]
+    past_window = past[-before:] if before > 0 else []
+    future_window = future[:after] if after > 0 else []
+    return {
+        "center_ts": center_ts,
+        "before_count": len(past_window),
+        "after_count": len(future_window),
+        "before_available": len(past),
+        "after_available": len(future),
+        "past": past_window,
+        "future": future_window,
+    }

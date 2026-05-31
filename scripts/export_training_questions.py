@@ -45,9 +45,18 @@ def parse_args() -> argparse.Namespace:
 
 def load_question_items(path: Path) -> list[dict[str, Any]]:
     if path.is_dir():
+        final_qa_path = path / "final_qa.json"
+        if final_qa_path.exists():
+            return load_question_items(final_qa_path)
         final_path = path / "final_questions.json"
         if final_path.exists():
             return load_question_items(final_path)
+        generic_qa_paths = sorted(path.glob("*/qa_*.json"))
+        if generic_qa_paths:
+            return [
+                {"qa": load_json(qa_path)}
+                for qa_path in generic_qa_paths
+            ]
         return [
             {"questions": load_json(question_path)}
             for question_path in sorted(path.glob("question_*.json"))
