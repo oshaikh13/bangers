@@ -167,3 +167,52 @@ def render_generic_qa_prompt(
         + str(qa_path)
         + "\n"
     )
+
+
+def render_pre_banger_qa_prompt(
+    template: str,
+    qa_type: str,
+    seed: dict[str, Any],
+    context_events: list[dict[str, Any]],
+    qa_path: Path,
+    provider: str,
+    pairs_per_run: int,
+) -> str:
+    rendered = (
+        template.replace("{qa_type}", qa_type)
+        .replace(
+            "{seed_json}",
+            json.dumps(seed, ensure_ascii=False, sort_keys=True),
+        )
+        .replace(
+            "{context_events_json}",
+            json.dumps(context_events, ensure_ascii=False, sort_keys=True),
+        )
+        .replace("{pairs_per_run}", str(pairs_per_run))
+    )
+    return (
+        rendered
+        + "\n\n"
+        + f"For this {provider} run, write the JSON file to this exact path: "
+        + str(qa_path)
+        + "\n"
+    )
+
+
+def render_pre_banger_seed_filter_prompt(
+    template: str,
+    seeds: list[dict[str, Any]],
+    output_path: Path,
+    provider: str,
+) -> str:
+    rendered = template.replace(
+        "{banger_seeds_json}",
+        json.dumps(seeds, ensure_ascii=False, sort_keys=True),
+    )
+    return (
+        rendered
+        + "\n\n"
+        + f"For this {provider} run, write the JSON file to this exact path: "
+        + str(output_path)
+        + "\n"
+    )

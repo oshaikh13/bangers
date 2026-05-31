@@ -14,6 +14,13 @@ DEFAULT_GENERIC_QA_COMMON_TEMPLATE = (
     REPO_ROOT / "prompts" / "10_generic_qa_common.md"
 )
 DEFAULT_GENERIC_QA_PROMPTS_DIR = REPO_ROOT / "prompts"
+DEFAULT_PRE_BANGER_QA_COMMON_TEMPLATE = (
+    REPO_ROOT / "prompts" / "20_pre_banger_common.md"
+)
+DEFAULT_PRE_BANGER_SEED_FILTER_TEMPLATE = (
+    REPO_ROOT / "prompts" / "20_pre_banger_filter.md"
+)
+DEFAULT_PRE_BANGER_QA_PROMPTS_DIR = REPO_ROOT / "prompts"
 
 
 def default_intervals_path(interval_minutes: int) -> Path:
