@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .agent_job import cleanup_isolated_workdir, run_agent_job
+from .agent_job import agent_log_paths, cleanup_isolated_workdir, run_agent_job
 from .cli import add_claude_args, add_codex_args
 from .intervals import select_rows
 from .io import append_jsonl, read_jsonl
@@ -489,11 +489,10 @@ def run_generic_qa_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_qa_path(agent_workdir, qa_type, interval_index)
 
-    stdout_path = args.generic_qa_dir / qa_type / (
-        f"qa_{interval_index}.{args.provider}.stdout.log"
-    )
-    stderr_path = args.generic_qa_dir / qa_type / (
-        f"qa_{interval_index}.{args.provider}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.generic_qa_dir / qa_type,
+        f"qa_{interval_index}",
+        args.provider,
     )
     prompt = render_generic_qa_prompt(
         template,

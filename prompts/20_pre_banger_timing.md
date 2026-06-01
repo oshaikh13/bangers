@@ -1,11 +1,11 @@
 # QA Type: Pre-Banger Timing
 
-Generate single-turn questions about whether now is a good intervention moment.
+Generate single-turn questions only about the user's receptivity window.
 
-Good questions ask whether the assistant should surface help now, wait, or stay
-quiet; what is becoming timely; what would be too early; what would soon be too
-late; and what the user is likely to do next without help. Keep the focus on
-marginal value and receptivity, not scheduling mechanics or artifact format.
+Good questions ask whether this exact moment is open, premature, stale, or too
+focused for brief help. Do not ask what the user will do themselves, whether
+they would click, or what hidden artifact would be useful; those belong to other
+QA types.
 
 Generate exactly `{pairs_per_run}` Q/A pairs unless fewer are honestly
 groundable. Never generate fewer than 3.

@@ -14,14 +14,22 @@ inspect `logs-indexed/` around and after their timestamps, and decide:
 - Would the assistant notice a timely synthesis, risk, contradiction, or
   framing that the user was unlikely to assemble themselves?
 
-## Input Banger Seeds
+## Input Bangers
 
-```json
-{banger_seeds_json}
+Read the combined banger seed file at this path:
+
+```text
+{combined_bangers_path}
 ```
 
+The file contains a top-level `seeds` array. Each seed already has its
+canonical `seed_id`, source indexes, original banger metadata, and hidden
+`target_banger`. Rank across every seed in that file, not just a time slice or
+subset.
+
 Each seed includes the original banger scores and metadata. The scores are
-useful hints, not the final answer.
+useful hints, not the final answer. You may use subagents to help rank and 
+search the logs.
 
 ## Scoring Criteria
 
@@ -114,7 +122,7 @@ Write JSON only:
 }
 ```
 
-Include a representative ranked list, best intervention moments first. Do not
-use `keep`, `downrank`, or any binary inclusion label. Low-ranked seeds are
+Include every candidate seed exactly once, best intervention moments first. Do
+not use `keep`, `downrank`, or any binary inclusion label. Low-ranked seeds are
 still useful as negative examples because their QA answers should teach the
 model why the assistant should wait or stay quiet.

@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from discovery.banger_manifest import write_combined_bangers_file
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DISCOVERY_DIR = REPO_ROOT / "discovery_codex_15m"
@@ -45,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         help="Markdown output path. Defaults to sequential_bangers.md in the bangers directory.",
+    )
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        help="JSON output path. Defaults to combined_bangers.json in the bangers directory.",
     )
     return parser.parse_args()
 
@@ -223,13 +230,19 @@ def main() -> int:
         raise SystemExit(f"bangers directory not found: {bangers_dir}")
 
     output = (args.output or bangers_dir / "sequential_bangers.md").resolve()
+    json_output = (args.json_output or bangers_dir / "combined_bangers.json").resolve()
 
     opportunities = load_opportunities(bangers_dir)
+    combined = write_combined_bangers_file(json_output, bangers_dir)
     write_text_atomically(output, render_markdown(opportunities) + "\n")
     missing = sum(1 for item in opportunities if item["sort_timestamp"] is None)
     print(
         f"wrote {len(opportunities)} opportunities -> {output}"
         + (f" ({missing} missing/unparseable timestamps)" if missing else ""),
+        file=sys.stderr,
+    )
+    print(
+        f"wrote {combined['seed_count']} banger seeds -> {json_output}",
         file=sys.stderr,
     )
     return 0

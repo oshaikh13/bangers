@@ -41,6 +41,14 @@ def copy_file_atomically(src: Path, dst: Path) -> None:
             tmp.unlink()
 
 
+def agent_log_paths(base_dir: Path, stem: str, provider: str) -> tuple[Path, Path]:
+    logs_dir = base_dir / "logs"
+    return (
+        logs_dir / f"{stem}.{provider}.stdout.log",
+        logs_dir / f"{stem}.{provider}.stderr.log",
+    )
+
+
 def run_agent_job(
     args,
     *,

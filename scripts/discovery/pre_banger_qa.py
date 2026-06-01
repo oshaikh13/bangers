@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .agent_job import cleanup_isolated_workdir, run_agent_job
+from .agent_job import agent_log_paths, cleanup_isolated_workdir, run_agent_job
+from .banger_manifest import write_combined_bangers_file
 from .cli import add_claude_args, add_codex_args
 from .intervals import parse_interval_indexes
 from .io import append_jsonl, read_jsonl
@@ -37,7 +38,6 @@ from .question_context import (
 )
 from .runner import (
     create_isolated_workdir,
-    split_bangers_batch_json,
     write_json_atomically,
 )
 
@@ -45,18 +45,15 @@ from .runner import (
 QA_TYPES = (
     "timing",
     "curiosity",
-    "engagement",
-    "surprise",
     "disregard",
-    "personal_relevance",
-    "threaded_mix",
+    "threaded",
 )
-THREADED_QA_TYPE = "threaded_mix"
+THREADED_QA_TYPE = "threaded"
 MIN_QAS_PER_RUN = 3
 MAX_QAS_PER_RUN = 10
 THREAD_COUNT = 3
 MIN_QAS_PER_THREAD = 3
-MAX_QAS_PER_THREAD = 6
+MAX_QAS_PER_THREAD = 10
 
 
 @dataclass(frozen=True)
@@ -116,6 +113,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory containing 03_bangers output. Defaults to <discovery-dir>/03_bangers.",
     )
     parser.add_argument(
+        "--combined-bangers-path",
+        help=(
+            "Combined banger seed JSON used by the ranking prompt. Defaults to "
+            "<bangers-dir>/combined_bangers.json."
+        ),
+    )
+    parser.add_argument(
         "--pre-banger-qa-dir",
         help=(
             "Pipeline 20 output directory. Defaults to "
@@ -156,7 +160,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--qa-types",
         default="all",
-        help="Comma-separated QA types to run, or 'all'. Known types: " + ", ".join(QA_TYPES),
+        help=(
+            "Comma-separated QA types to run, or 'all'. Known types: "
+            + ", ".join(QA_TYPES)
+        ),
     )
     parser.add_argument(
         "--pairs-per-run",
@@ -288,15 +295,12 @@ def interval_indexes_slug(raw: str) -> str:
     )
 
 
-def default_seed_filter_path(pre_banger_qa_dir: Path, interval_indexes: str | None) -> Path:
-    if interval_indexes:
-        return pre_banger_qa_dir / f"seed_rankings_intervals_{interval_indexes_slug(interval_indexes)}.json"
+def default_seed_filter_path(pre_banger_qa_dir: Path) -> Path:
     return pre_banger_qa_dir / "seed_rankings.json"
 
 
 def normalize_args(args: argparse.Namespace) -> None:
     interval_minutes = args.interval_minutes or DEFAULT_INTERVAL_MINUTES
-    seed_filter_path_was_explicit = args.seed_filter_path is not None
     if interval_minutes <= 0:
         raise SystemExit("--interval-minutes must be greater than 0")
     if args.jobs <= 0:
@@ -322,6 +326,11 @@ def normalize_args(args: argparse.Namespace) -> None:
     args.bangers_dir = (
         Path(args.bangers_dir) if args.bangers_dir else args.discovery_dir / "03_bangers"
     ).resolve()
+    args.combined_bangers_path = (
+        Path(args.combined_bangers_path)
+        if args.combined_bangers_path
+        else args.bangers_dir / "combined_bangers.json"
+    ).resolve()
     args.pre_banger_qa_dir = (
         Path(args.pre_banger_qa_dir)
         if args.pre_banger_qa_dir
@@ -336,10 +345,9 @@ def normalize_args(args: argparse.Namespace) -> None:
     args.seed_filter_template = Path(args.seed_filter_template).resolve()
     args.seed_filter_path = (
         Path(args.seed_filter_path)
-        if seed_filter_path_was_explicit
-        else default_seed_filter_path(args.pre_banger_qa_dir, args.interval_indexes)
+        if args.seed_filter_path
+        else default_seed_filter_path(args.pre_banger_qa_dir)
     ).resolve()
-    args.seed_filter_path_was_explicit = seed_filter_path_was_explicit
     args.prompts_dir = Path(args.prompts_dir).resolve()
     args.qa_types = parse_qa_types(args.qa_types)
     args.seed_ids = parse_seed_ids(args.seed_ids)
@@ -383,62 +391,6 @@ def qa_path(args: argparse.Namespace, qa_type: str, seed_id: str) -> Path:
 
 def agent_qa_path(agent_workdir: Path, qa_type: str, seed_id: str) -> Path:
     return agent_workdir / "agent-output" / qa_type / f"qa_{seed_id}.json"
-
-
-def banger_files(bangers_dir: Path) -> list[Path]:
-    return sorted(
-        [
-            path
-            for pattern in ("bangers_*.json", "banger_*.json")
-            for path in bangers_dir.glob(pattern)
-        ]
-    )
-
-
-def load_seed_candidates(bangers_dir: Path) -> list[dict[str, Any]]:
-    if not bangers_dir.exists():
-        raise SystemExit(f"bangers directory not found: {bangers_dir}")
-
-    seeds: list[dict[str, Any]] = []
-    for path in banger_files(bangers_dir):
-        for combined_index, data in split_bangers_batch_json(path):
-            goals = data.get("goals")
-            if not isinstance(goals, list):
-                continue
-            for goal_index, goal in enumerate(goals):
-                if not isinstance(goal, dict):
-                    continue
-                opportunities = goal.get("opportunities")
-                if not isinstance(opportunities, list):
-                    continue
-                for opportunity_index, opportunity in enumerate(opportunities):
-                    if not isinstance(opportunity, dict):
-                        continue
-                    seed_id = f"{combined_index}_{goal_index}_{opportunity_index}"
-                    seed = {
-                        "seed_id": seed_id,
-                        "combined_index": combined_index,
-                        "goal_index": goal_index,
-                        "opportunity_index": opportunity_index,
-                        "banger_timestamp": opportunity.get("timestamp"),
-                        "goal": goal.get("goal"),
-                        "suggestion": opportunity.get("suggestion"),
-                        "action": opportunity.get("action"),
-                        "expected_artifact": opportunity.get("expected_artifact"),
-                        "usefulness": opportunity.get("usefulness"),
-                        "confidence": opportunity.get("confidence"),
-                        "surprise": opportunity.get("surprise"),
-                        "disregard": opportunity.get("disregard"),
-                        "trigger_evidence": opportunity.get("trigger_evidence"),
-                        "why_now": opportunity.get("why_now"),
-                        "source_bangers_path": str(path),
-                        "target_banger": {
-                            "goal": goal.get("goal"),
-                            **opportunity,
-                        },
-                    }
-                    seeds.append(seed)
-    return seeds
 
 
 def load_interval_filter_rows(args: argparse.Namespace) -> list[dict[str, Any]] | None:
@@ -491,26 +443,6 @@ def filter_seeds_by_interval_rows(
     return [seed for seed in seeds if seed_in_interval_rows(seed, rows)]
 
 
-def select_seed_candidates_for_ranking(
-    args: argparse.Namespace,
-    seeds: list[dict[str, Any]],
-    interval_rows: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]]:
-    selected = filter_seeds_by_interval_rows(seeds, interval_rows)
-    if args.seed_ids is not None:
-        selected = [seed for seed in selected if seed.get("seed_id") in args.seed_ids]
-
-    parsed_banger_input_indexes = parse_interval_indexes(banger_input_indexes_arg(args))
-    if parsed_banger_input_indexes is not None:
-        selected = [
-            seed
-            for seed in selected
-            if isinstance(seed.get("combined_index"), int)
-            and seed["combined_index"] in parsed_banger_input_indexes
-        ]
-    return selected
-
-
 def seed_filter_path(args: argparse.Namespace) -> Path:
     return args.seed_filter_path
 
@@ -520,7 +452,7 @@ def agent_seed_filter_path(agent_workdir: Path) -> Path:
 
 
 def load_seed_filter_template(args: argparse.Namespace) -> str:
-    return load_template(args.seed_filter_template, ("{banger_seeds_json}",))
+    return load_template(args.seed_filter_template, ("{combined_bangers_path}",))
 
 
 def validate_seed_filter_data(data: Any, all_seeds: list[dict[str, Any]], path: Path | str) -> None:
@@ -663,12 +595,13 @@ def print_seed_filter_dry_run(
     provider = build_provider_command(args, agent_workdir)
     prompt = render_pre_banger_seed_filter_prompt(
         template,
-        all_seeds,
+        args.combined_bangers_path,
         agent_output_path,
         provider.name,
     )
     print("\n--- pre-banger seed ranking ---")
     print(f"seed ranking path: {output_path}")
+    print(f"combined bangers path: {args.combined_bangers_path}")
     print(f"candidate seeds: {len(all_seeds)}")
     print(f"agent seed ranking path: {agent_output_path}")
     print(f"agent workdir: {agent_workdir}")
@@ -696,11 +629,14 @@ def run_seed_filter_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_seed_filter_path(agent_workdir)
 
-    stdout_path = args.pre_banger_qa_dir / f"seed_filter.{args.provider}.stdout.log"
-    stderr_path = args.pre_banger_qa_dir / f"seed_filter.{args.provider}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.pre_banger_qa_dir,
+        "seed_filter",
+        args.provider,
+    )
     prompt = render_pre_banger_seed_filter_prompt(
         template,
-        all_seeds,
+        args.combined_bangers_path,
         agent_output_path,
         args.provider,
     )
@@ -725,6 +661,7 @@ def run_seed_filter_once(
         "mode": "pre_banger_seed_ranking",
         "discovery_dir": str(args.discovery_dir),
         "bangers_dir": str(args.bangers_dir),
+        "combined_bangers_path": str(args.combined_bangers_path),
         "pre_banger_qa_dir": str(args.pre_banger_qa_dir),
         "seed_filter_path": str(output_path),
         "candidate_seed_count": len(all_seeds),
@@ -798,13 +735,7 @@ def attach_pre_banger_context(
     output["target_banger"] = seed.get("target_banger", {})
     output["context_events"] = context_events
 
-    if qa_type != THREADED_QA_TYPE:
-        qa_pairs = output.get("qa_pairs")
-        if isinstance(qa_pairs, list):
-            for pair in qa_pairs:
-                if isinstance(pair, dict):
-                    pair.setdefault("category", f"pre_banger_{qa_type}")
-    else:
+    if qa_type == THREADED_QA_TYPE:
         threads = output.get("threads")
         if isinstance(threads, list):
             for thread in threads:
@@ -815,7 +746,13 @@ def attach_pre_banger_context(
                     continue
                 for pair in qa_pairs:
                     if isinstance(pair, dict):
-                        pair.setdefault("category", "pre_banger_threaded_mix")
+                        pair.setdefault("category", "pre_banger_threaded")
+    else:
+        qa_pairs = output.get("qa_pairs")
+        if isinstance(qa_pairs, list):
+            for pair in qa_pairs:
+                if isinstance(pair, dict):
+                    pair.setdefault("category", f"pre_banger_{qa_type}")
     return output
 
 
@@ -984,11 +921,10 @@ def run_pre_banger_qa_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_qa_path(agent_workdir, qa_type, seed_id)
 
-    stdout_path = args.pre_banger_qa_dir / qa_type / (
-        f"qa_{seed_id}.{args.provider}.stdout.log"
-    )
-    stderr_path = args.pre_banger_qa_dir / qa_type / (
-        f"qa_{seed_id}.{args.provider}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.pre_banger_qa_dir / qa_type,
+        f"qa_{seed_id}",
+        args.provider,
     )
     prompt = render_pre_banger_qa_prompt(
         template,
@@ -1117,22 +1053,18 @@ def run(args: argparse.Namespace) -> int:
     if not args.repo_root.exists():
         raise SystemExit(f"repo root not found: {args.repo_root}")
 
-    all_seeds = load_seed_candidates(args.bangers_dir)
+    combined_bangers = write_combined_bangers_file(
+        args.combined_bangers_path,
+        args.bangers_dir,
+    )
+    all_seeds = combined_bangers["seeds"]
     if not all_seeds:
         raise SystemExit(f"no banger seeds found in {args.bangers_dir}")
     interval_rows = load_interval_filter_rows(args)
-    ranking_candidates = select_seed_candidates_for_ranking(
-        args,
-        all_seeds,
-        interval_rows,
-    )
-    if not ranking_candidates:
-        print("no pre-banger seed candidates selected for ranking", file=sys.stderr)
-        return 0
 
     seed_filter_template = load_seed_filter_template(args)
     if args.dry_run and (args.force_seed_filter or not seed_filter_path(args).exists()):
-        print_seed_filter_dry_run(args, seed_filter_template, ranking_candidates)
+        print_seed_filter_dry_run(args, seed_filter_template, all_seeds)
         return 0
 
     ranked: list[dict[str, Any]] | None = None
@@ -1151,7 +1083,7 @@ def run(args: argparse.Namespace) -> int:
             needs_seed_ranking = True
 
     if needs_seed_ranking:
-        result = run_seed_filter_once(args, seed_filter_template, ranking_candidates)
+        result = run_seed_filter_once(args, seed_filter_template, all_seeds)
         append_jsonl(args.run_log, result.record)
         if result.returncode != 0:
             print(
@@ -1191,10 +1123,6 @@ def run(args: argparse.Namespace) -> int:
     print(f"candidate pre-banger seeds: {len(all_seeds)}", file=sys.stderr)
     if interval_rows is not None:
         print(f"selected intervals: {len(interval_rows)}", file=sys.stderr)
-        print(
-            f"interval-scoped seed candidates: {len(ranking_candidates)}",
-            file=sys.stderr,
-        )
     print(f"prompt-ranked pre-banger seeds: {len(ranked)}", file=sys.stderr)
     print(f"selected pre-banger seeds: {len(seeds)}", file=sys.stderr)
     print(f"selected pre-banger QA runs: {len(selected)}", file=sys.stderr)

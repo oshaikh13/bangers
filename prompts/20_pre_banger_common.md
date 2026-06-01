@@ -23,25 +23,21 @@ The target QA type for this run is:
 You are also given a hidden historical banger seed with ranking metadata. Use
 it as supervision for whether an assistant intervention would have high
 marginal value at this moment. Do not reveal that seed mechanically in every
-question. The questions should teach the user model how to infer whether to
-surface help now, wait, or stay quiet.
+question. The questions should teach the user model how to infer the user's
+state: attention, preferences, beliefs, receptivity, and likely next behavior.
 
-Good answers should usually explain:
+Answers must be concise: usually 1-2 short sentences. Focus on what the user
+seems to care about, believe, notice, tolerate, or do next. Do not enumerate the
+hidden banger artifact, write an implementation plan, or explain the full
+suggestion unless the question truly requires it.
 
-- What the user is likely to do next without help.
-- Whether now is a good time to surface proactive help.
-- What marginal value the assistant would add beyond the user's likely next
-  action.
-- Why the user would engage, ignore it, or be interrupted by it.
-- Why the user probably would or would not assemble the same synthesis
-  themselves.
-- What non-obvious connection, risk, timing window, or reframing makes the
-  intervention valuable.
+For yes/no questions, answer with the judgment first, then the user-state
+reason. Prefer answers like: "Yes. The user seems to care about avoiding data
+loss, and they are already asking about cleanup."
 
 Do not anchor questions on artifact shape. Avoid questions about sections,
 schemas, document types, or deliverable formats unless that is essential to the
-timing judgment. Prefer "should the assistant surface anything now?" over "what
-document should be created?"
+user-state judgment.
 
 ## Hidden Seed Banger
 
@@ -69,13 +65,15 @@ limited to the latest 100 events with `ts <= banger_timestamp`.
 - Do not ask multiple-choice questions.
 - Do not ask compound questions.
 - Keep questions short and natural.
-- Prefer questions that help a banger generator decide whether intervention has
-  marginal value now, not questions that merely specify a document.
-- It is valid for an answer to say the assistant should wait or stay quiet.
+- Ask only within the QA type's lane. Do not reuse generic intervention
+  questions that belong to another type.
+- Only timing-lane questions should directly ask whether the assistant should
+  surface, wait, or stay quiet. In threaded output, that belongs in the
+  receptivity thread.
 - Calibrate answers to the hidden ranking metadata. High intervention-value
-  seeds should sound clearly worth surfacing now; low intervention-value seeds
-  should explain why the idea is useful but poorly timed, obvious, or likely to
-  be done by the user anyway.
+  seeds should sound like a clearer user-state signal; low intervention-value
+  seeds should explain why the same topic is poorly timed, obvious, or likely
+  to be handled by the user anyway.
 - When ranking metadata includes `negative_reason`, use it to make negative
   answers specific: self-done, obvious next step, interruptive, undergrounded,
   or stale. Negatives should often mean "good idea, bad intervention moment,"
@@ -88,10 +86,9 @@ question in third person about "the user". Never use first person.
 
 - Bad: "What would I want to see?"
 - Bad: "Would I open this?"
-- Good: "Is now a good moment for the assistant to help?"
-- Good: "What is the user likely to do next without help?"
-- Good: "Would surfacing help now interrupt the user's flow?"
-- Good: "Would the user likely make this themselves?"
+- Good: "What concern is the user showing?"
+- Good: "Does the user's current activity look interruptible?"
+- Good: "Would the user likely check this on their own?"
 
 Answers should also speak about the user in third person.
 

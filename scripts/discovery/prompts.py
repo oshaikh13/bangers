@@ -201,14 +201,11 @@ def render_pre_banger_qa_prompt(
 
 def render_pre_banger_seed_filter_prompt(
     template: str,
-    seeds: list[dict[str, Any]],
+    combined_bangers_path: Path,
     output_path: Path,
     provider: str,
 ) -> str:
-    rendered = template.replace(
-        "{banger_seeds_json}",
-        json.dumps(seeds, ensure_ascii=False, sort_keys=True),
-    )
+    rendered = template.replace("{combined_bangers_path}", str(combined_bangers_path))
     return (
         rendered
         + "\n\n"

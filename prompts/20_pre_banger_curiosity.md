@@ -1,13 +1,12 @@
 # QA Type: Pre-Banger Curiosity
 
-Generate single-turn questions about when a curiosity hook would be worth
-surfacing now.
+Generate single-turn questions only about the uncertainty, concern, or
+ambiguity the user is revealing.
 
-Good questions identify hooks the user would be curious to inspect, but also
-ask whether the timing makes that hook useful or distracting. Strong hooks
-include a contradiction, hidden connection, source-backed answer to a nagging
-question, surprising comparison, or concrete thing that resolves ambiguity.
-Avoid asking for artifact sections or format.
+Good questions ask what the user seems curious, unsure, or worried about from
+the visible context. Do not ask whether the assistant should help now, whether
+the user would engage, or whether the user would handle it themselves; those
+belong to other QA types.
 
 Generate exactly `{pairs_per_run}` Q/A pairs unless fewer are honestly
 groundable. Never generate fewer than 3.

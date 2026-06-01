@@ -16,9 +16,9 @@ from discovery.pre_banger_qa import (
     load_pre_banger_qa_template,
     load_seed_filter,
     load_seed_filter_template,
+    parse_args,
     parse_qa_types,
     select_filtered_seeds,
-    select_seed_candidates_for_ranking,
     validate_seed_filter_data,
     validate_pre_banger_qa_data,
     write_final_pre_banger_qa,
@@ -32,11 +32,20 @@ from discovery.question_context import training_rows_from_final_questions
 
 class PreBangerQATests(unittest.TestCase):
     def test_parse_qa_types_expands_all_and_dedupes(self) -> None:
-        self.assertIn("threaded_mix", parse_qa_types("all"))
         self.assertEqual(
-            parse_qa_types("curiosity,engagement,curiosity"),
-            ["curiosity", "engagement"],
+            parse_qa_types("all"),
+            ["timing", "curiosity", "disregard", "threaded"],
         )
+        self.assertEqual(
+            parse_qa_types("curiosity,threaded,curiosity"),
+            ["curiosity", "threaded"],
+        )
+
+    def test_interval_runs_reuse_global_seed_ranking_path(self) -> None:
+        args = parse_args(["--interval-indexes", "40-49"])
+
+        self.assertEqual(args.seed_filter_path.name, "seed_rankings.json")
+        self.assertEqual(args.combined_bangers_path.name, "combined_bangers.json")
 
     def test_seed_ranking_prompt_and_loader_preserve_scored_order(self) -> None:
         all_seeds = [
@@ -49,14 +58,16 @@ class PreBangerQATests(unittest.TestCase):
         template = load_seed_filter_template(args)
         prompt = render_pre_banger_seed_filter_prompt(
             template,
-            all_seeds,
+            Path("/tmp/combined_bangers.json"),
             Path("/tmp/seed_rankings.json"),
             "codex",
         )
 
         self.assertIn("Do not merely sort by the original numeric fields", prompt)
         self.assertIn("intervention_value_now", prompt)
-        self.assertIn('"seed_id": "cool_open"', prompt)
+        self.assertIn("/tmp/combined_bangers.json", prompt)
+        self.assertIn("top-level `seeds` array", prompt)
+        self.assertIn("Include every candidate seed exactly once", prompt)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             filter_path = Path(tmp_dir) / "seed_rankings.json"
@@ -129,32 +140,6 @@ class PreBangerQATests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "must not include selection_label"):
             validate_seed_filter_data(data, all_seeds, "seed_rankings.json")
 
-    def test_interval_rows_select_seed_candidates_by_banger_timestamp(self) -> None:
-        seeds = [
-            {
-                "seed_id": "inside",
-                "combined_index": 25,
-                "banger_timestamp": "2026-04-08T16:31:46.325Z",
-            },
-            {
-                "seed_id": "outside",
-                "combined_index": 29,
-                "banger_timestamp": "2026-04-08T18:00:00Z",
-            },
-        ]
-        interval_rows = [
-            {
-                "interval_index": 45,
-                "start_ts": 1775665424.439826,
-                "end_ts": 1775666324.439826,
-            }
-        ]
-        args = SimpleNamespace(seed_ids=None, banger_input_indexes=None, start=0, limit=None)
-
-        selected = select_seed_candidates_for_ranking(args, seeds, interval_rows)
-
-        self.assertEqual([seed["seed_id"] for seed in selected], ["inside"])
-
     def test_select_filtered_seeds_combines_interval_and_start_limit(self) -> None:
         seeds = [
             {
@@ -213,7 +198,7 @@ class PreBangerQATests(unittest.TestCase):
         self.assertIn("QA Type: Pre-Banger Curiosity", prompt)
         self.assertIn('"seed_id": "29_0_0"', prompt)
         self.assertIn('"text": "Visible context"', prompt)
-        self.assertIn("surface help now, wait, or stay quiet", prompt)
+        self.assertIn("attention, preferences, beliefs", prompt)
         self.assertIn("/tmp/qa_29_0_0.json", prompt)
 
     def test_validate_pre_banger_accepts_flat_payload(self) -> None:
@@ -229,14 +214,14 @@ class PreBangerQATests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "references missing context event index"):
             validate_pre_banger_qa_data(data, "qa.json")
 
-    def test_write_final_pre_banger_qa_consolidates_flat_and_threaded_files(self) -> None:
+    def test_write_final_pre_banger_qa_consolidates_supported_type_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             pre_banger_dir = Path(tmp_dir) / "20_pre_banger_qa"
-            flat_dir = pre_banger_dir / "curiosity"
-            threaded_dir = pre_banger_dir / "threaded_mix"
-            flat_dir.mkdir(parents=True)
+            curiosity_dir = pre_banger_dir / "curiosity"
+            threaded_dir = pre_banger_dir / "threaded"
+            curiosity_dir.mkdir(parents=True)
             threaded_dir.mkdir(parents=True)
-            (flat_dir / "qa_29_0_0.json").write_text(
+            (curiosity_dir / "qa_29_0_0.json").write_text(
                 json.dumps(_valid_flat_payload()),
                 encoding="utf-8",
             )
@@ -251,7 +236,7 @@ class PreBangerQATests(unittest.TestCase):
 
             final_data = json.loads((pre_banger_dir / "final_qa.json").read_text())
             self.assertEqual(len(final_data), 2)
-            self.assertEqual({item["qa_type"] for item in final_data}, {"curiosity", "threaded_mix"})
+            self.assertEqual({item["qa_type"] for item in final_data}, {"curiosity", "threaded"})
 
     def test_write_final_pre_banger_qa_uses_interval_specific_filename(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -278,7 +263,7 @@ class PreBangerQATests(unittest.TestCase):
         rows = training_rows_from_final_questions(
             [
                 {"qa": _valid_flat_payload(), "qa_type": "curiosity"},
-                {"qa": _valid_threaded_payload(), "qa_type": "threaded_mix"},
+                {"qa": _valid_threaded_payload(), "qa_type": "threaded"},
             ]
         )
 
@@ -287,16 +272,18 @@ class PreBangerQATests(unittest.TestCase):
         self.assertEqual(rows[0]["category"], "pre_banger_curiosity")
         self.assertNotIn("target_banger", rows[0])
         self.assertNotIn("seed_id", rows[0])
+        self.assertEqual(rows[-1]["qa_type"], "threaded")
         self.assertEqual(rows[-1]["thread_id"], 2)
 
-    def test_threaded_questions_are_intervention_oriented(self) -> None:
-        prompt_text = (REPO_ROOT / "prompts" / "20_pre_banger_threaded_mix.md").read_text(
+    def test_threaded_prompt_requires_coherent_thread_arcs(self) -> None:
+        prompt_text = (REPO_ROOT / "prompts" / "20_pre_banger_threaded.md").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("likely next action -> intervention value", prompt_text)
-        self.assertIn("stay quiet", prompt_text)
-        self.assertIn("Avoid questions that over-specify document structure", prompt_text)
+        self.assertIn("Each thread must have a clear throughline", prompt_text)
+        self.assertIn("Thread 0, receptivity", prompt_text)
+        self.assertIn("Thread 1, curiosity", prompt_text)
+        self.assertIn("Thread 2, self-done", prompt_text)
 
 
 def _context_event() -> dict:
@@ -369,23 +356,27 @@ def _valid_flat_payload(qa_type: str = "curiosity") -> dict:
 
 
 def _valid_threaded_payload() -> dict:
-    def thread(thread_id: int) -> dict:
+    def thread(thread_id: int, category: str) -> dict:
         return {
             "thread_id": thread_id,
             "qa_pairs": [
-                _pair(0, "What is the user circling around?", "pre_banger_threaded_mix"),
-                _pair(1, "What would the user likely do next?", "pre_banger_threaded_mix"),
-                _pair(2, "Should the assistant surface help now?", "pre_banger_threaded_mix"),
+                _pair(0, "What is the user's current state?", category),
+                _pair(1, "What signal should the assistant read next?", category),
+                _pair(2, "What should the assistant infer from that signal?", category),
             ],
         }
 
     return {
-        "qa_type": "threaded_mix",
+        "qa_type": "threaded",
         "seed_id": "29_0_0",
         "banger_timestamp": 100.0,
         "target_banger": {"suggestion": "hidden"},
         "context_events": [_context_event()],
-        "threads": [thread(0), thread(1), thread(2)],
+        "threads": [
+            thread(0, "pre_banger_timing"),
+            thread(1, "pre_banger_curiosity"),
+            thread(2, "pre_banger_disregard"),
+        ],
     }
 
 

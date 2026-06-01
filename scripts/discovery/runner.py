@@ -15,7 +15,12 @@ from typing import Any
 
 from tqdm import tqdm
 
-from .agent_job import cleanup_isolated_workdir, copy_file_atomically, run_agent_job
+from .agent_job import (
+    agent_log_paths,
+    cleanup_isolated_workdir,
+    copy_file_atomically,
+    run_agent_job,
+)
 from .intervals import parse_interval_indexes, select_rows
 from .io import append_jsonl, read_jsonl
 from .qa_validation import (
@@ -220,8 +225,11 @@ def run_one_interval(
 ) -> IntervalResult:
     interval_index = int(row["interval_index"])
     goal_path = args.goals_dir / f"goal_{interval_index}.json"
-    stdout_path = args.goals_dir / f"goal_{interval_index}.stdout.log"
-    stderr_path = args.goals_dir / f"goal_{interval_index}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.goals_dir,
+        f"goal_{interval_index}",
+        args.provider,
+    )
 
     isolated_workdir: Path | None = None
     if args.no_isolate_agent_workdir:
@@ -533,8 +541,11 @@ def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
             copy_file_atomically(path, agent_goals_dir / path.name)
         agent_combined_path = agent_workdir / "agent-output" / "combined.json"
 
-    stdout_path = args.combined_dir / f"combined.{args.provider}.stdout.log"
-    stderr_path = args.combined_dir / f"combined.{args.provider}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.combined_dir,
+        "combined",
+        args.provider,
+    )
     prompt = render_combine_prompt(
         template,
         agent_goals_dir,
@@ -704,8 +715,11 @@ def run_bridges_once(args: argparse.Namespace, template: str) -> BridgesResult:
         copy_file_atomically(combined_path, agent_combined_path)
         agent_bridges_path = agent_workdir / "agent-output" / "bridges.json"
 
-    stdout_path = args.bridges_dir / f"bridges.{args.provider}.stdout.log"
-    stderr_path = args.bridges_dir / f"bridges.{args.provider}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.bridges_dir,
+        "bridges",
+        args.provider,
+    )
     prompt = render_bridges_prompt(
         template,
         agent_combined_path,
@@ -1019,8 +1033,11 @@ def run_bangers_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_bangers_path(agent_workdir, input_index)
 
-    stdout_path = args.bangers_dir / f"banger_{input_index}.{args.provider}.stdout.log"
-    stderr_path = args.bangers_dir / f"banger_{input_index}.{args.provider}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.bangers_dir,
+        f"banger_{input_index}",
+        args.provider,
+    )
     prompt = render_bangers_prompt(
         template,
         input_element,
@@ -1102,8 +1119,11 @@ def run_bangers_batch_once(
         agent_output_path = agent_bangers_batch_path(agent_workdir, input_indexes)
 
     log_stem = banger_batch_log_stem(input_indexes)
-    stdout_path = args.bangers_dir / f"{log_stem}.{args.provider}.stdout.log"
-    stderr_path = args.bangers_dir / f"{log_stem}.{args.provider}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.bangers_dir,
+        log_stem,
+        args.provider,
+    )
     prompt = render_bangers_batch_prompt(
         template,
         {
@@ -1468,11 +1488,10 @@ def run_questions_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_questions_path(agent_workdir, suggestion)
 
-    stdout_path = args.questions_dir / (
-        f"question_{suggestion_index}.{args.provider}.stdout.log"
-    )
-    stderr_path = args.questions_dir / (
-        f"question_{suggestion_index}.{args.provider}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.questions_dir,
+        f"question_{suggestion_index}",
+        args.provider,
     )
     prompt = render_questions_prompt(
         template,
