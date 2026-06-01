@@ -60,12 +60,12 @@ Great suggestions are things that:
 
 - Accelerate a goal the user might not have time to pursue.
 - Consolidate scattered context into a decision, message, plan, or artifact
-- Package prepared content in a small workspace only when ongoing review, editing, tracking, or approval materially helps
 - Prepare for an upcoming moment where context will matter
 - Resolve repeated loops, hesitation, or unresolved cognitive load
 - Discover a latent goal the user has not explicitly identified yet
 - Explain or investigate a meaningful anomaly
 - Reduce future friction from a recurring pattern
+- Help with a problem a user will have in the future
 
 ## Suggestions
 

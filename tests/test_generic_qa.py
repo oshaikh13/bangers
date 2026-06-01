@@ -25,9 +25,10 @@ from discovery.question_context import training_rows_from_final_questions
 class GenericQATests(unittest.TestCase):
     def test_parse_qa_types_expands_all_and_dedupes_specific_types(self) -> None:
         self.assertIn("activity_window", parse_qa_types("all"))
+        self.assertIn("verbatim_textbox", parse_qa_types("all"))
         self.assertEqual(
-            parse_qa_types("recall,activity_window,recall"),
-            ["recall", "activity_window"],
+            parse_qa_types("recall,verbatim_textbox,recall"),
+            ["recall", "verbatim_textbox"],
         )
 
     def test_context_for_interval_uses_latest_100_events_before_end_ts(self) -> None:
@@ -81,8 +82,39 @@ class GenericQATests(unittest.TestCase):
         self.assertIn('"interval_index": 0', prompt)
         self.assertIn("/tmp/qa.json", prompt)
 
+    def test_load_and_render_verbatim_textbox_prompt(self) -> None:
+        args = SimpleNamespace(
+            common_template=REPO_ROOT / "prompts" / "10_generic_qa_common.md",
+            prompts_dir=REPO_ROOT / "prompts",
+        )
+        template = load_generic_qa_template(args, "verbatim_textbox")
+        row = {"interval_index": 0, "end_ts": 1.0, "end_utc": "2026-01-01T00:00:01Z"}
+
+        prompt = render_generic_qa_prompt(
+            template,
+            "verbatim_textbox",
+            row,
+            [],
+            Path("/tmp/qa.json"),
+            "codex",
+            10,
+        )
+
+        self.assertIn("QA Type: Verbatim Textbox", prompt)
+        self.assertIn("preserving spelling, casing, punctuation", prompt)
+        self.assertIn('output `"qa_pairs": []`', prompt)
+
     def test_validate_generic_qa_accepts_flat_payload_with_mixed_grounding(self) -> None:
         validate_generic_qa_data(_valid_generic_qa_payload(), "qa.json")
+
+    def test_validate_generic_qa_allows_empty_sparse_verbatim_textbox_payload(self) -> None:
+        data = {
+            **_valid_generic_qa_payload(),
+            "qa_type": "verbatim_textbox",
+            "qa_pairs": [],
+        }
+
+        validate_generic_qa_data(data, "qa.json")
 
     def test_validate_generic_qa_accepts_legacy_threaded_payload(self) -> None:
         flat = _valid_generic_qa_payload()

@@ -6,10 +6,10 @@ import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_job import agent_log_paths, cleanup_isolated_workdir, run_agent_job
 from .cli import add_claude_args, add_codex_args
 from .intervals import select_rows
 from .io import append_jsonl, read_jsonl
@@ -21,9 +21,9 @@ from .paths import (
     default_discovery_dir,
     default_intervals_path,
 )
-from .process import run_command
 from .prompts import load_template, render_generic_qa_prompt
 from .providers import build_provider_command
+from .qa_validation import valid_context_indexes, validate_grounded_pair
 from .question_context import (
     QUESTION_CONTEXT_EVENT_COUNT,
     context_events_for_timestamp,
@@ -31,8 +31,6 @@ from .question_context import (
     parse_timestamp,
 )
 from .runner import (
-    cleanup_isolated_workdir,
-    copy_file_atomically,
     create_isolated_workdir,
     write_json_atomically,
 )
@@ -42,6 +40,7 @@ QA_TYPES = (
     "activity_window",
     "todo",
     "predictive_actions",
+    "verbatim_textbox",
     "predictive_struggles",
     "assistant_utility",
     "affective_state",
@@ -53,8 +52,8 @@ QA_TYPES = (
     "current_state",
 )
 
-ANSWER_BASES = {"H", "F", "H+F"}
-TIMESCALES = {"micro", "short", "medium", "long"}
+SPARSE_QA_TYPES = frozenset({"verbatim_textbox"})
+
 MIN_QAS_PER_THREAD = 3
 MAX_QAS_PER_THREAD = 10
 
@@ -399,131 +398,30 @@ def validate_generic_qa_data(data: Any, path: Path | str) -> None:
     if cutoff_ts is None:
         raise RuntimeError(f"generic QA output has invalid qa_timestamp: {path}")
 
-    context_events = data.get("context_events")
-    if not isinstance(context_events, list):
-        raise RuntimeError(f"generic QA output must include context_events: {path}")
-    if len(context_events) > QUESTION_CONTEXT_EVENT_COUNT:
-        raise RuntimeError(
-            f"generic QA context_events must have at most "
-            f"{QUESTION_CONTEXT_EVENT_COUNT} events: {path}"
-        )
-
-    valid_context_indexes: set[int] = set()
-    for index, event in enumerate(context_events):
-        if not isinstance(event, dict):
-            raise RuntimeError(
-                f"generic QA context_events[{index}] must be an object: {path}"
-            )
-        if event.get("index") != index:
-            raise RuntimeError(
-                f"generic QA context_events indexes must be contiguous from 0: {path}"
-            )
-        valid_context_indexes.add(index)
+    valid_indexes = valid_context_indexes(data, path, "generic QA")
 
     qa_pairs = extract_qa_pairs(data)
     if qa_pairs is None:
         raise RuntimeError(f"generic QA output must include qa_pairs: {path}")
-    if not (MIN_QAS_PER_THREAD <= len(qa_pairs) <= MAX_QAS_PER_THREAD):
+    min_qa_pairs = 0 if qa_type in SPARSE_QA_TYPES else MIN_QAS_PER_THREAD
+    if not (min_qa_pairs <= len(qa_pairs) <= MAX_QAS_PER_THREAD):
         raise RuntimeError(
             f"generic QA output qa_pairs must contain "
-            f"{MIN_QAS_PER_THREAD}-{MAX_QAS_PER_THREAD} entries, got "
+            f"{min_qa_pairs}-{MAX_QAS_PER_THREAD} entries, got "
             f"{len(qa_pairs)}: {path}"
         )
 
     for pair_index, pair in enumerate(qa_pairs):
-        location = f"qa_pairs[{pair_index}]"
-        if not isinstance(pair, dict):
-            raise RuntimeError(f"generic QA output {location} must be an object: {path}")
-        if pair.get("q_id") != pair_index:
-            raise RuntimeError(
-                f"generic QA output {location}.q_id must equal {pair_index}: {path}"
-            )
-
-        for key in (
-            "question",
-            "answer",
-            "category",
-            "timescale",
-            "answer_basis",
-            "verify_at_ts",
-            "verify_at_iso",
-            "question_basis",
-            "why_it_matters",
-            "evidence_grounding",
-            "question_difficulty",
-        ):
-            if key not in pair:
-                raise RuntimeError(
-                    f"generic QA output {location} must include {key}: {path}"
-                )
-
-        for key in ("question", "answer", "category", "why_it_matters", "evidence_grounding"):
-            if not isinstance(pair.get(key), str) or not pair.get(key):
-                raise RuntimeError(
-                    f"generic QA output {location}.{key} must be a non-empty string: {path}"
-                )
-
-        if pair.get("timescale") not in TIMESCALES:
-            raise RuntimeError(
-                f"generic QA output {location}.timescale must be one of "
-                f"{sorted(TIMESCALES)}: {path}"
-            )
-
-        answer_basis = pair.get("answer_basis")
-        if answer_basis not in ANSWER_BASES:
-            raise RuntimeError(
-                f"generic QA output {location}.answer_basis must be H, F, or H+F: {path}"
-            )
-
-        verify_at_ts = parse_timestamp(pair.get("verify_at_ts"))
-        if verify_at_ts is None:
-            raise RuntimeError(
-                f"generic QA output {location}.verify_at_ts must be parseable: {path}"
-            )
-        if answer_basis == "H" and verify_at_ts >= cutoff_ts:
-            raise RuntimeError(
-                f"generic QA output {location}.verify_at_ts must be before "
-                f"qa_timestamp for H answers: {path}"
-            )
-        if answer_basis in {"F", "H+F"} and verify_at_ts < cutoff_ts:
-            raise RuntimeError(
-                f"generic QA output {location}.verify_at_ts must be at or after "
-                f"qa_timestamp for {answer_basis} answers: {path}"
-            )
-
-        if not isinstance(pair.get("question_difficulty"), (int, float)):
-            raise RuntimeError(
-                f"generic QA output {location}.question_difficulty must be a number: {path}"
-            )
-
-        question_basis = pair.get("question_basis")
-        if not isinstance(question_basis, dict):
-            raise RuntimeError(
-                f"generic QA output {location}.question_basis must be an object: {path}"
-            )
-        reason = question_basis.get("reason")
-        if not isinstance(reason, str) or not reason:
-            raise RuntimeError(
-                f"generic QA output {location}.question_basis.reason must be "
-                f"a non-empty string: {path}"
-            )
-        basis_indexes = question_basis.get("context_event_indexes")
-        if not isinstance(basis_indexes, list) or not basis_indexes:
-            raise RuntimeError(
-                f"generic QA output {location}.question_basis.context_event_indexes "
-                f"must be a non-empty array: {path}"
-            )
-        for basis_index in basis_indexes:
-            if not isinstance(basis_index, int):
-                raise RuntimeError(
-                    f"generic QA output {location}.question_basis.context_event_indexes "
-                    f"must contain integers: {path}"
-                )
-            if basis_index not in valid_context_indexes:
-                raise RuntimeError(
-                    f"generic QA output {location} references missing context "
-                    f"event index {basis_index}: {path}"
-                )
+        validate_grounded_pair(
+            pair,
+            pair_index,
+            f"qa_pairs[{pair_index}]",
+            cutoff_ts,
+            valid_indexes,
+            path,
+            "generic QA",
+            "qa_timestamp",
+        )
 
 
 def print_generic_qa_dry_run(
@@ -595,52 +493,38 @@ def run_generic_qa_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_qa_path(agent_workdir, qa_type, interval_index)
 
-    provider = build_provider_command(args, agent_workdir)
-    stdout_path = args.generic_qa_dir / qa_type / (
-        f"qa_{interval_index}.{provider.name}.stdout.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.generic_qa_dir / qa_type,
+        f"qa_{interval_index}",
+        args.provider,
     )
-    stderr_path = args.generic_qa_dir / qa_type / (
-        f"qa_{interval_index}.{provider.name}.stderr.log"
-    )
-    stdout_path.parent.mkdir(parents=True, exist_ok=True)
     prompt = render_generic_qa_prompt(
         template,
         qa_type,
         row,
         context_events,
         agent_output_path,
-        provider.name,
+        args.provider,
         args.pairs_per_run,
     )
-    started_at = datetime.now(timezone.utc).isoformat()
-
-    print(
-        f"generic QA {qa_type} interval {interval_index} -> {output_path}",
-        file=sys.stderr,
+    job = run_agent_job(
+        args,
+        agent_workdir=agent_workdir,
+        isolated_workdir=isolated_workdir,
+        prompt=prompt,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        prefix=f"{args.provider}:generic-qa:{qa_type}:{interval_index}",
+        log_message=f"generic QA {qa_type} interval {interval_index} -> {output_path}",
+        output_path=output_path,
+        agent_output_path=agent_output_path,
     )
-    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    try:
-        returncode = run_command(
-            provider.command,
-            agent_workdir,
-            prompt,
-            stdout_path,
-            stderr_path,
-            f"{provider.name}:generic-qa:{qa_type}:{interval_index}",
-        )
-        if agent_output_path.exists() and agent_output_path != output_path:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            copy_file_atomically(agent_output_path, output_path)
-    finally:
-        if isolated_workdir is not None:
-            cleanup_isolated_workdir(args, isolated_workdir)
 
-    if returncode == 0 and output_path.exists():
+    if job.returncode == 0 and output_path.exists():
         normalize_generic_qa_file(output_path, qa_type, row, context_events)
 
-    completed_at = datetime.now(timezone.utc).isoformat()
     record = {
-        "provider": provider.name,
+        "provider": job.provider.name,
         "mode": "generic_qa",
         "qa_type": qa_type,
         "discovery_dir": str(args.discovery_dir),
@@ -652,23 +536,23 @@ def run_generic_qa_once(
         "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
-        "stdout_path": str(stdout_path),
-        "stderr_path": str(stderr_path),
-        "returncode": returncode,
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "model": provider.model,
-        "effort": provider.effort,
-        "sandbox": provider.sandbox,
+        "stdout_path": str(job.stdout_path),
+        "stderr_path": str(job.stderr_path),
+        "returncode": job.returncode,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "model": job.provider.model,
+        "effort": job.provider.effort,
+        "sandbox": job.provider.sandbox,
     }
     return GenericQAResult(
         qa_type=qa_type,
         interval_index=interval_index,
         record=record,
         qa_path=output_path,
-        stderr_path=stderr_path,
-        returncode=returncode,
-        created_qa=output_path.exists(),
+        stderr_path=job.stderr_path,
+        returncode=job.returncode,
+        created_qa=job.created_output,
     )
 
 
@@ -680,7 +564,7 @@ def iter_generic_qa_files(generic_qa_dir: Path) -> list[tuple[str, int, Path]]:
             continue
         for path in sorted(type_dir.glob("qa_*.json")):
             try:
-                interval_index = int(path.stem.removeprefix("qa_"))
+                interval_index = int(path.stem[len("qa_") :])
             except ValueError:
                 continue
             files.append((qa_type, interval_index, path))

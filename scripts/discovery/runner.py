@@ -10,15 +10,24 @@ import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from tqdm import tqdm
 
+from .agent_job import (
+    agent_log_paths,
+    cleanup_isolated_workdir,
+    copy_file_atomically,
+    run_agent_job,
+)
 from .intervals import parse_interval_indexes, select_rows
 from .io import append_jsonl, read_jsonl
-from .process import run_command
+from .qa_validation import (
+    require_text_fields,
+    valid_context_indexes,
+    validate_question_basis,
+)
 from .prompts import (
     load_template,
     render_bangers_batch_prompt,
@@ -209,24 +218,6 @@ def create_isolated_workdir(
     return workdir
 
 
-def cleanup_isolated_workdir(args: argparse.Namespace, workdir: Path) -> None:
-    if args.keep_agent_workdirs:
-        print(f"kept isolated agent workdir: {workdir}", file=sys.stderr)
-        return
-    shutil.rmtree(workdir)
-
-
-def copy_file_atomically(src: Path, dst: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_name(f".{dst.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
-    try:
-        shutil.copy2(src, tmp)
-        os.replace(tmp, dst)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
-
-
 def run_one_interval(
     args: argparse.Namespace,
     template: str,
@@ -234,8 +225,11 @@ def run_one_interval(
 ) -> IntervalResult:
     interval_index = int(row["interval_index"])
     goal_path = args.goals_dir / f"goal_{interval_index}.json"
-    stdout_path = args.goals_dir / f"goal_{interval_index}.stdout.log"
-    stderr_path = args.goals_dir / f"goal_{interval_index}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.goals_dir,
+        f"goal_{interval_index}",
+        args.provider,
+    )
 
     isolated_workdir: Path | None = None
     if args.no_isolate_agent_workdir:
@@ -248,30 +242,21 @@ def run_one_interval(
             agent_workdir / "agent-output" / f"goal_{interval_index}.json"
         )
 
-    provider = build_provider_command(args, agent_workdir)
-    prompt = render_discovery_prompt(template, row, agent_goal_path, provider.name)
-    started_at = datetime.now(timezone.utc).isoformat()
-    print(f"run interval {interval_index} -> {goal_path}", file=sys.stderr)
-    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-
-    try:
-        returncode = run_command(
-            provider.command,
-            agent_workdir,
-            prompt,
-            stdout_path,
-            stderr_path,
-            f"{provider.name}:{interval_index}",
-        )
-        if agent_goal_path.exists() and agent_goal_path != goal_path:
-            copy_file_atomically(agent_goal_path, goal_path)
-    finally:
-        if isolated_workdir is not None:
-            cleanup_isolated_workdir(args, isolated_workdir)
-
-    completed_at = datetime.now(timezone.utc).isoformat()
+    prompt = render_discovery_prompt(template, row, agent_goal_path, args.provider)
+    job = run_agent_job(
+        args,
+        agent_workdir=agent_workdir,
+        isolated_workdir=isolated_workdir,
+        prompt=prompt,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        prefix=f"{args.provider}:{interval_index}",
+        log_message=f"run interval {interval_index} -> {goal_path}",
+        output_path=goal_path,
+        agent_output_path=agent_goal_path,
+    )
     record = {
-        "provider": provider.name,
+        "provider": job.provider.name,
         "discovery_dir": str(args.discovery_dir),
         "goals_dir": str(args.goals_dir),
         "interval_index": interval_index,
@@ -281,22 +266,22 @@ def run_one_interval(
         "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
-        "stdout_path": str(stdout_path),
-        "stderr_path": str(stderr_path),
-        "returncode": returncode,
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "model": provider.model,
-        "effort": provider.effort,
-        "sandbox": provider.sandbox,
+        "stdout_path": str(job.stdout_path),
+        "stderr_path": str(job.stderr_path),
+        "returncode": job.returncode,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "model": job.provider.model,
+        "effort": job.provider.effort,
+        "sandbox": job.provider.sandbox,
     }
     return IntervalResult(
         interval_index=interval_index,
         record=record,
         goal_path=goal_path,
-        stderr_path=stderr_path,
-        returncode=returncode,
-        created_goal=goal_path.exists(),
+        stderr_path=job.stderr_path,
+        returncode=job.returncode,
+        created_goal=job.created_output,
     )
 
 
@@ -377,14 +362,22 @@ def banger_inputs_path(args: argparse.Namespace) -> Path:
     return args.suggestion_inputs_dir / "inputs.json"
 
 
-def select_combined_elements(
+def banger_input_indexes_arg(args: argparse.Namespace) -> str | None:
+    return getattr(args, "banger_input_indexes", None) or getattr(
+        args,
+        "combined_indexes",
+        None,
+    )
+
+
+def select_banger_input_elements(
     elements: list[dict[str, Any]],
-    combined_indexes: str | None,
+    banger_input_indexes: str | None,
     start: int,
     limit: int | None,
 ) -> list[tuple[int, dict[str, Any]]]:
     selected = list(enumerate(elements))
-    parsed_indexes = parse_interval_indexes(combined_indexes)
+    parsed_indexes = parse_interval_indexes(banger_input_indexes)
     if parsed_indexes is not None:
         selected = [
             (index, element) for index, element in selected if index in parsed_indexes
@@ -407,27 +400,7 @@ def validate_questions_json(path: Path) -> None:
 def validate_questions_data(data: Any, path: Path | str) -> None:
     if not isinstance(data, dict):
         raise RuntimeError(f"questions output must be a JSON object: {path}")
-    context_events = data.get("context_events")
-    if not isinstance(context_events, list):
-        raise RuntimeError(f"questions output must include context_events: {path}")
-    if len(context_events) > QUESTION_CONTEXT_EVENT_COUNT:
-        raise RuntimeError(
-            f"questions output context_events must have at most "
-            f"{QUESTION_CONTEXT_EVENT_COUNT} events: {path}"
-        )
-    valid_context_indexes: set[int] = set()
-    for index, event in enumerate(context_events):
-        if not isinstance(event, dict):
-            raise RuntimeError(
-                f"questions output context_events[{index}] must be an object: {path}"
-            )
-        event_index = event.get("index")
-        if event_index != index:
-            raise RuntimeError(
-                f"questions output context_events indexes must be contiguous "
-                f"from 0: {path}"
-            )
-        valid_context_indexes.add(index)
+    valid_indexes = valid_context_indexes(data, path, "questions")
 
     if "threads" not in data:
         raise RuntimeError(f"questions output must include threads: {path}")
@@ -484,52 +457,24 @@ def validate_questions_data(data: Any, path: Path | str) -> None:
                     raise RuntimeError(
                         f"questions output {location} must include {key}: {path}"
                     )
-            for key in (
-                "question",
-                "answer",
-                "why_it_matters",
-                "evidence_grounding",
-            ):
-                if not isinstance(pair.get(key), str) or not pair.get(key):
-                    raise RuntimeError(
-                        f"questions output {location}.{key} must be a "
-                        f"non-empty string: {path}"
-                    )
+            require_text_fields(
+                pair,
+                (
+                    "question",
+                    "answer",
+                    "why_it_matters",
+                    "evidence_grounding",
+                ),
+                location,
+                path,
+                "questions",
+            )
             if not isinstance(pair.get("question_difficulty"), (int, float)):
                 raise RuntimeError(
                     f"questions output {location}.question_difficulty must "
                     f"be a number: {path}"
                 )
-            question_basis = pair.get("question_basis")
-            if not isinstance(question_basis, dict):
-                raise RuntimeError(
-                    f"questions output {location}.question_basis must be "
-                    f"an object: {path}"
-                )
-            if not isinstance(question_basis.get("reason"), str) or not (
-                question_basis.get("reason")
-            ):
-                raise RuntimeError(
-                    f"questions output {location}.question_basis.reason "
-                    f"must be a non-empty string: {path}"
-                )
-            basis_indexes = question_basis.get("context_event_indexes")
-            if not isinstance(basis_indexes, list) or not basis_indexes:
-                raise RuntimeError(
-                    f"questions output {location}.question_basis."
-                    f"context_event_indexes must be a non-empty array: {path}"
-                )
-            for basis_index in basis_indexes:
-                if not isinstance(basis_index, int):
-                    raise RuntimeError(
-                        f"questions output {location}.question_basis."
-                        f"context_event_indexes must contain integers: {path}"
-                    )
-                if basis_index not in valid_context_indexes:
-                    raise RuntimeError(
-                        f"questions output {location} references missing "
-                        f"context event index {basis_index}: {path}"
-                    )
+            validate_question_basis(pair, location, valid_indexes, path, "questions")
 
 
 def print_combine_dry_run(args: argparse.Namespace, template: str) -> None:
@@ -596,40 +541,35 @@ def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
             copy_file_atomically(path, agent_goals_dir / path.name)
         agent_combined_path = agent_workdir / "agent-output" / "combined.json"
 
-    provider = build_provider_command(args, agent_workdir)
-    stdout_path = args.combined_dir / f"combined.{provider.name}.stdout.log"
-    stderr_path = args.combined_dir / f"combined.{provider.name}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.combined_dir,
+        "combined",
+        args.provider,
+    )
     prompt = render_combine_prompt(
         template,
         agent_goals_dir,
         agent_combined_path,
-        provider.name,
+        args.provider,
     )
-    started_at = datetime.now(timezone.utc).isoformat()
+    job = run_agent_job(
+        args,
+        agent_workdir=agent_workdir,
+        isolated_workdir=isolated_workdir,
+        prompt=prompt,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        prefix=f"{args.provider}:combine",
+        log_message=f"combine {len(files)} goal files -> {combined_path}",
+        output_path=combined_path,
+        agent_output_path=agent_combined_path,
+    )
 
-    print(f"combine {len(files)} goal files -> {combined_path}", file=sys.stderr)
-    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    try:
-        returncode = run_command(
-            provider.command,
-            agent_workdir,
-            prompt,
-            stdout_path,
-            stderr_path,
-            f"{provider.name}:combine",
-        )
-        if agent_combined_path.exists() and agent_combined_path != combined_path:
-            copy_file_atomically(agent_combined_path, combined_path)
-    finally:
-        if isolated_workdir is not None:
-            cleanup_isolated_workdir(args, isolated_workdir)
-
-    if returncode == 0 and combined_path.exists():
+    if job.returncode == 0 and combined_path.exists():
         validate_combined_json(combined_path)
 
-    completed_at = datetime.now(timezone.utc).isoformat()
     record = {
-        "provider": provider.name,
+        "provider": job.provider.name,
         "mode": "combine",
         "discovery_dir": str(args.discovery_dir),
         "goals_dir": str(args.goals_dir),
@@ -639,21 +579,21 @@ def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
         "goal_count": len(files),
-        "stdout_path": str(stdout_path),
-        "stderr_path": str(stderr_path),
-        "returncode": returncode,
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "model": provider.model,
-        "effort": provider.effort,
-        "sandbox": provider.sandbox,
+        "stdout_path": str(job.stdout_path),
+        "stderr_path": str(job.stderr_path),
+        "returncode": job.returncode,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "model": job.provider.model,
+        "effort": job.provider.effort,
+        "sandbox": job.provider.sandbox,
     }
     return CombineResult(
         record=record,
         combined_path=combined_path,
-        stderr_path=stderr_path,
-        returncode=returncode,
-        created_combined=combined_path.exists(),
+        stderr_path=job.stderr_path,
+        returncode=job.returncode,
+        created_combined=job.created_output,
     )
 
 
@@ -775,40 +715,35 @@ def run_bridges_once(args: argparse.Namespace, template: str) -> BridgesResult:
         copy_file_atomically(combined_path, agent_combined_path)
         agent_bridges_path = agent_workdir / "agent-output" / "bridges.json"
 
-    provider = build_provider_command(args, agent_workdir)
-    stdout_path = args.bridges_dir / f"bridges.{provider.name}.stdout.log"
-    stderr_path = args.bridges_dir / f"bridges.{provider.name}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.bridges_dir,
+        "bridges",
+        args.provider,
+    )
     prompt = render_bridges_prompt(
         template,
         agent_combined_path,
         agent_bridges_path,
-        provider.name,
+        args.provider,
     )
-    started_at = datetime.now(timezone.utc).isoformat()
+    job = run_agent_job(
+        args,
+        agent_workdir=agent_workdir,
+        isolated_workdir=isolated_workdir,
+        prompt=prompt,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        prefix=f"{args.provider}:bridges",
+        log_message=f"bridge {combined_path} -> {bridges_path}",
+        output_path=bridges_path,
+        agent_output_path=agent_bridges_path,
+    )
 
-    print(f"bridge {combined_path} -> {bridges_path}", file=sys.stderr)
-    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    try:
-        returncode = run_command(
-            provider.command,
-            agent_workdir,
-            prompt,
-            stdout_path,
-            stderr_path,
-            f"{provider.name}:bridges",
-        )
-        if agent_bridges_path.exists() and agent_bridges_path != bridges_path:
-            copy_file_atomically(agent_bridges_path, bridges_path)
-    finally:
-        if isolated_workdir is not None:
-            cleanup_isolated_workdir(args, isolated_workdir)
-
-    if returncode == 0 and bridges_path.exists():
+    if job.returncode == 0 and bridges_path.exists():
         validate_bridges_json(bridges_path)
 
-    completed_at = datetime.now(timezone.utc).isoformat()
     record = {
-        "provider": provider.name,
+        "provider": job.provider.name,
         "mode": "bridges",
         "discovery_dir": str(args.discovery_dir),
         "combined_path": str(combined_path),
@@ -817,21 +752,21 @@ def run_bridges_once(args: argparse.Namespace, template: str) -> BridgesResult:
         "agent_visible_roots": ["agent-input", "agent-output"]
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
-        "stdout_path": str(stdout_path),
-        "stderr_path": str(stderr_path),
-        "returncode": returncode,
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "model": provider.model,
-        "effort": provider.effort,
-        "sandbox": provider.sandbox,
+        "stdout_path": str(job.stdout_path),
+        "stderr_path": str(job.stderr_path),
+        "returncode": job.returncode,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "model": job.provider.model,
+        "effort": job.provider.effort,
+        "sandbox": job.provider.sandbox,
     }
     return BridgesResult(
         record=record,
         bridges_path=bridges_path,
-        stderr_path=stderr_path,
-        returncode=returncode,
-        created_bridges=bridges_path.exists(),
+        stderr_path=job.stderr_path,
+        returncode=job.returncode,
+        created_bridges=job.created_output,
     )
 
 
@@ -1098,40 +1033,35 @@ def run_bangers_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_bangers_path(agent_workdir, input_index)
 
-    provider = build_provider_command(args, agent_workdir)
-    stdout_path = args.bangers_dir / f"banger_{input_index}.{provider.name}.stdout.log"
-    stderr_path = args.bangers_dir / f"banger_{input_index}.{provider.name}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.bangers_dir,
+        f"banger_{input_index}",
+        args.provider,
+    )
     prompt = render_bangers_prompt(
         template,
         input_element,
         agent_output_path,
-        provider.name,
+        args.provider,
     )
-    started_at = datetime.now(timezone.utc).isoformat()
+    job = run_agent_job(
+        args,
+        agent_workdir=agent_workdir,
+        isolated_workdir=isolated_workdir,
+        prompt=prompt,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        prefix=f"{args.provider}:bangers:{input_index}",
+        log_message=f"bangers input {input_index} -> {output_path}",
+        output_path=output_path,
+        agent_output_path=agent_output_path,
+    )
 
-    print(f"bangers input {input_index} -> {output_path}", file=sys.stderr)
-    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    try:
-        returncode = run_command(
-            provider.command,
-            agent_workdir,
-            prompt,
-            stdout_path,
-            stderr_path,
-            f"{provider.name}:bangers:{input_index}",
-        )
-        if agent_output_path.exists() and agent_output_path != output_path:
-            copy_file_atomically(agent_output_path, output_path)
-    finally:
-        if isolated_workdir is not None:
-            cleanup_isolated_workdir(args, isolated_workdir)
-
-    if returncode == 0 and output_path.exists():
+    if job.returncode == 0 and output_path.exists():
         validate_bangers_json(output_path)
 
-    completed_at = datetime.now(timezone.utc).isoformat()
     record = {
-        "provider": provider.name,
+        "provider": job.provider.name,
         "mode": "bangers",
         "discovery_dir": str(args.discovery_dir),
         "goals_dir": str(args.goals_dir),
@@ -1146,22 +1076,22 @@ def run_bangers_once(
         "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
-        "stdout_path": str(stdout_path),
-        "stderr_path": str(stderr_path),
-        "returncode": returncode,
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "model": provider.model,
-        "effort": provider.effort,
-        "sandbox": provider.sandbox,
+        "stdout_path": str(job.stdout_path),
+        "stderr_path": str(job.stderr_path),
+        "returncode": job.returncode,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "model": job.provider.model,
+        "effort": job.provider.effort,
+        "sandbox": job.provider.sandbox,
     }
     return BangersResult(
         combined_index=input_index,
         record=record,
         bangers_path=output_path,
-        stderr_path=stderr_path,
-        returncode=returncode,
-        created_bangers=output_path.exists(),
+        stderr_path=job.stderr_path,
+        returncode=job.returncode,
+        created_bangers=job.created_output,
     )
 
 
@@ -1188,44 +1118,39 @@ def run_bangers_batch_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_bangers_batch_path(agent_workdir, input_indexes)
 
-    provider = build_provider_command(args, agent_workdir)
     log_stem = banger_batch_log_stem(input_indexes)
-    stdout_path = args.bangers_dir / f"{log_stem}.{provider.name}.stdout.log"
-    stderr_path = args.bangers_dir / f"{log_stem}.{provider.name}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.bangers_dir,
+        log_stem,
+        args.provider,
+    )
     prompt = render_bangers_batch_prompt(
         template,
         {
             "output_path": str(agent_output_path),
             "items": banger_batch_prompt_elements(batch),
         },
-        provider.name,
+        args.provider,
     )
-    started_at = datetime.now(timezone.utc).isoformat()
-
-    print(f"bangers inputs {label} -> {args.bangers_dir}", file=sys.stderr)
-    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    try:
-        returncode = run_command(
-            provider.command,
-            agent_workdir,
-            prompt,
-            stdout_path,
-            stderr_path,
-            f"{provider.name}:bangers:{label}",
-        )
-        if agent_output_path.exists() and agent_output_path != output_path:
-            copy_file_atomically(agent_output_path, output_path)
-    finally:
-        if isolated_workdir is not None:
-            cleanup_isolated_workdir(args, isolated_workdir)
+    job = run_agent_job(
+        args,
+        agent_workdir=agent_workdir,
+        isolated_workdir=isolated_workdir,
+        prompt=prompt,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        prefix=f"{args.provider}:bangers:{label}",
+        log_message=f"bangers inputs {label} -> {args.bangers_dir}",
+        output_path=output_path,
+        agent_output_path=agent_output_path,
+    )
 
     missing_paths = [] if output_path.exists() else [output_path]
-    if returncode == 0 and output_path.exists():
+    if job.returncode == 0 and output_path.exists():
         validate_bangers_json(output_path)
 
-    completed_at = datetime.now(timezone.utc).isoformat()
     record = {
-        "provider": provider.name,
+        "provider": job.provider.name,
         "mode": "bangers",
         "discovery_dir": str(args.discovery_dir),
         "goals_dir": str(args.goals_dir),
@@ -1247,22 +1172,22 @@ def run_bangers_batch_once(
         "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
-        "stdout_path": str(stdout_path),
-        "stderr_path": str(stderr_path),
-        "returncode": returncode,
+        "stdout_path": str(job.stdout_path),
+        "stderr_path": str(job.stderr_path),
+        "returncode": job.returncode,
         "missing_paths": [str(path) for path in missing_paths],
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "model": provider.model,
-        "effort": provider.effort,
-        "sandbox": provider.sandbox,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "model": job.provider.model,
+        "effort": job.provider.effort,
+        "sandbox": job.provider.sandbox,
     }
     return BangersBatchResult(
         input_indexes=input_indexes,
         record=record,
         bangers_paths=[output_path],
-        stderr_path=stderr_path,
-        returncode=returncode,
+        stderr_path=job.stderr_path,
+        returncode=job.returncode,
         missing_paths=missing_paths,
     )
 
@@ -1280,9 +1205,9 @@ def run_bangers(args: argparse.Namespace) -> int:
 
     template = load_template(args.template, ("{combined_json_element}",))
     elements = load_combined_json(input_path)
-    selected = select_combined_elements(
+    selected = select_banger_input_elements(
         elements,
-        args.combined_indexes,
+        banger_input_indexes_arg(args),
         args.start,
         args.limit,
     )
@@ -1467,7 +1392,7 @@ def load_suggestions_from_bangers(args: argparse.Namespace) -> list[dict[str, An
     if not args.bangers_dir.exists():
         raise SystemExit(f"bangers directory not found: {args.bangers_dir}")
 
-    parsed_indexes = parse_interval_indexes(args.combined_indexes)
+    parsed_indexes = parse_interval_indexes(banger_input_indexes_arg(args))
     suggestions: list[dict[str, Any]] = []
     for path in banger_files(args.bangers_dir):
         for combined_index, data in split_bangers_batch_json(path):
@@ -1563,45 +1488,36 @@ def run_questions_once(
         isolated_workdir = agent_workdir
         agent_output_path = agent_questions_path(agent_workdir, suggestion)
 
-    provider = build_provider_command(args, agent_workdir)
-    stdout_path = args.questions_dir / (
-        f"question_{suggestion_index}.{provider.name}.stdout.log"
-    )
-    stderr_path = args.questions_dir / (
-        f"question_{suggestion_index}.{provider.name}.stderr.log"
+    stdout_path, stderr_path = agent_log_paths(
+        args.questions_dir,
+        f"question_{suggestion_index}",
+        args.provider,
     )
     prompt = render_questions_prompt(
         template,
         suggestion,
         context_events,
         agent_output_path,
-        provider.name,
+        args.provider,
     )
-    started_at = datetime.now(timezone.utc).isoformat()
+    job = run_agent_job(
+        args,
+        agent_workdir=agent_workdir,
+        isolated_workdir=isolated_workdir,
+        prompt=prompt,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        prefix=f"{args.provider}:questions:{suggestion_index}",
+        log_message=f"questions suggestion {suggestion_index} -> {output_path}",
+        output_path=output_path,
+        agent_output_path=agent_output_path,
+    )
 
-    print(f"questions suggestion {suggestion_index} -> {output_path}", file=sys.stderr)
-    print(f"{provider.name} command:", " ".join(provider.command), file=sys.stderr)
-    try:
-        returncode = run_command(
-            provider.command,
-            agent_workdir,
-            prompt,
-            stdout_path,
-            stderr_path,
-            f"{provider.name}:questions:{suggestion_index}",
-        )
-        if agent_output_path.exists() and agent_output_path != output_path:
-            copy_file_atomically(agent_output_path, output_path)
-    finally:
-        if isolated_workdir is not None:
-            cleanup_isolated_workdir(args, isolated_workdir)
-
-    if returncode == 0 and output_path.exists():
+    if job.returncode == 0 and output_path.exists():
         normalize_questions_file(output_path, suggestion, context_events)
 
-    completed_at = datetime.now(timezone.utc).isoformat()
     record = {
-        "provider": provider.name,
+        "provider": job.provider.name,
         "mode": "questions",
         "discovery_dir": str(args.discovery_dir),
         "goals_dir": str(args.goals_dir),
@@ -1617,22 +1533,22 @@ def run_questions_once(
         "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
         else ["repo_root"],
-        "stdout_path": str(stdout_path),
-        "stderr_path": str(stderr_path),
-        "returncode": returncode,
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "model": provider.model,
-        "effort": provider.effort,
-        "sandbox": provider.sandbox,
+        "stdout_path": str(job.stdout_path),
+        "stderr_path": str(job.stderr_path),
+        "returncode": job.returncode,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "model": job.provider.model,
+        "effort": job.provider.effort,
+        "sandbox": job.provider.sandbox,
     }
     return QuestionsResult(
         suggestion_index=suggestion_index,
         record=record,
         questions_path=output_path,
-        stderr_path=stderr_path,
-        returncode=returncode,
-        created_questions=output_path.exists(),
+        stderr_path=job.stderr_path,
+        returncode=job.returncode,
+        created_questions=job.created_output,
     )
 
 

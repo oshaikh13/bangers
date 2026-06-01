@@ -16,7 +16,7 @@ context_events + question
 It must answer from those visible past events. You, the labeler, may inspect
 the wider `logs-indexed/` folder, including future events, to produce the
 gold answer. The final training export will drop all metadata except the
-past context, question, and answer.
+past context, question, and answer. You may use subagents to help.
 
 ## Timestamp
 
