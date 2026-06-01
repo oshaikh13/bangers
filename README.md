@@ -7,13 +7,13 @@ generate QA data, and export training JSONL.
 
 Prereqs: Python 3.11+, `uv`, and either `codex` or `claude` on `PATH`.
 Source logs default to `../powernap/logs`.
+Commands below use 4 parallel provider jobs where supported.
 
 ```bash
 uv sync
 
 export PROVIDER=codex
 export INTERVAL=15
-export JOBS=4
 export DISCOVERY_DIR="discovery_${PROVIDER}_${INTERVAL}m"
 
 ./scripts/index_all.sh
@@ -22,7 +22,7 @@ uv run scripts/record_intervals.py "$INTERVAL"
 uv run scripts/runners/run_discovery_goals.py \
   --provider "$PROVIDER" \
   --interval-minutes "$INTERVAL" \
-  --jobs "$JOBS" \
+  --jobs 4 \
   --continue-on-error
 
 uv run scripts/runners/run_discovery_combine.py \
@@ -41,7 +41,7 @@ uv run scripts/build_suggestion_inputs.py \
 uv run scripts/runners/run_discovery_bangers.py \
   --provider "$PROVIDER" \
   --interval-minutes "$INTERVAL" \
-  --jobs "$JOBS" \
+  --jobs 4 \
   --banger-batch-size 5 \
   --continue-on-error
 
@@ -51,7 +51,7 @@ uv run scripts/combine_bangers.py \
 uv run scripts/runners/run_discovery_questions.py \
   --provider "$PROVIDER" \
   --interval-minutes "$INTERVAL" \
-  --jobs "$JOBS" \
+  --jobs 4 \
   --continue-on-error
 
 uv run scripts/export_training_questions.py \
@@ -62,7 +62,7 @@ uv run scripts/runners/run_generic_qa.py \
   --provider "$PROVIDER" \
   --interval-minutes "$INTERVAL" \
   --qa-types all \
-  --jobs "$JOBS" \
+  --jobs 4 \
   --continue-on-error
 
 uv run scripts/export_training_questions.py \
@@ -73,7 +73,7 @@ uv run scripts/runners/run_pre_banger_qa.py \
   --provider "$PROVIDER" \
   --interval-minutes "$INTERVAL" \
   --qa-types all \
-  --jobs "$JOBS" \
+  --jobs 4 \
   --continue-on-error
 
 uv run scripts/export_training_questions.py \
@@ -98,9 +98,9 @@ stages:
 ```bash
 export RANGE=0-99
 
-uv run scripts/runners/run_discovery_goals.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --interval-indexes "$RANGE" --jobs "$JOBS"
-uv run scripts/runners/run_generic_qa.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --interval-indexes "$RANGE" --qa-types all --jobs "$JOBS"
-uv run scripts/runners/run_pre_banger_qa.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --interval-indexes "$RANGE" --qa-types all --jobs "$JOBS"
+uv run scripts/runners/run_discovery_goals.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --interval-indexes "$RANGE" --jobs 4
+uv run scripts/runners/run_generic_qa.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --interval-indexes "$RANGE" --qa-types all --jobs 4
+uv run scripts/runners/run_pre_banger_qa.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --interval-indexes "$RANGE" --qa-types all --jobs 4
 ```
 
 Then run the combine, bridge, suggestion-input, banger, question, and export

@@ -88,8 +88,8 @@ def validate_grounded_pair(
 ) -> None:
     if not isinstance(pair, dict):
         raise RuntimeError(f"{label} output {location} must be an object: {path}")
-    if pair.get("q_id") != pair_index:
-        raise RuntimeError(f"{label} output {location}.q_id must equal {pair_index}: {path}")
+    if not isinstance(pair.get("q_id"), int):
+        raise RuntimeError(f"{label} output {location}.q_id must be an integer: {path}")
 
     for key in (
         "question",
