@@ -40,6 +40,7 @@ QA_TYPES = (
     "activity_window",
     "todo",
     "predictive_actions",
+    "verbatim_textbox",
     "predictive_struggles",
     "assistant_utility",
     "affective_state",
@@ -50,6 +51,8 @@ QA_TYPES = (
     "recall",
     "current_state",
 )
+
+SPARSE_QA_TYPES = frozenset({"verbatim_textbox"})
 
 MIN_QAS_PER_THREAD = 3
 MAX_QAS_PER_THREAD = 10
@@ -400,10 +403,11 @@ def validate_generic_qa_data(data: Any, path: Path | str) -> None:
     qa_pairs = extract_qa_pairs(data)
     if qa_pairs is None:
         raise RuntimeError(f"generic QA output must include qa_pairs: {path}")
-    if not (MIN_QAS_PER_THREAD <= len(qa_pairs) <= MAX_QAS_PER_THREAD):
+    min_qa_pairs = 0 if qa_type in SPARSE_QA_TYPES else MIN_QAS_PER_THREAD
+    if not (min_qa_pairs <= len(qa_pairs) <= MAX_QAS_PER_THREAD):
         raise RuntimeError(
             f"generic QA output qa_pairs must contain "
-            f"{MIN_QAS_PER_THREAD}-{MAX_QAS_PER_THREAD} entries, got "
+            f"{min_qa_pairs}-{MAX_QAS_PER_THREAD} entries, got "
             f"{len(qa_pairs)}: {path}"
         )
 
