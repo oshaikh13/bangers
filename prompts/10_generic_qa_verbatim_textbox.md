@@ -22,6 +22,8 @@ Good questions are short and ask for one final text value:
 - "What final search query will the user enter?"
 - "What exact comment will the user post?"
 
+NO NEED TO PUT THE EXACT TIME IN THE QUESTION - it will be provided.
+
 Do not ask if the future only reveals a general action, a page title, a file
 name, a selected option, or an assistant-generated draft. The target text must
 be user-authored or user-edited text visible in a textbox-like field.
