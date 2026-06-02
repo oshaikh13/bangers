@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from discovery.scoping import scoped_stage_dir, scope_slug
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DISCOVERY_DIR = REPO_ROOT / "discovery_codex_15m"
@@ -32,17 +34,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--combined",
         type=Path,
-        help="Path to combined.json. Defaults to <discovery-dir>/02a_combined/combined.json.",
+        help=(
+            "Path to combined.json. Defaults to scoped "
+            "<discovery-dir>/02a_combined/combined.json."
+        ),
     )
     parser.add_argument(
         "--bridges",
         type=Path,
-        help="Path to bridges.json. Defaults to <discovery-dir>/02b_bridges/bridges.json.",
+        help=(
+            "Path to bridges.json. Defaults to scoped "
+            "<discovery-dir>/02b_bridges/bridges.json."
+        ),
     )
     parser.add_argument(
         "--output",
         type=Path,
-        help="Output path. Defaults to <discovery-dir>/02c_suggestion_inputs/inputs.json.",
+        help=(
+            "Output path. Defaults to scoped "
+            "<discovery-dir>/02c_suggestion_inputs/inputs.json."
+        ),
+    )
+    parser.add_argument(
+        "--interval-indexes",
+        help="Scope defaults to an interval selector, e.g. `2-42`.",
+    )
+    parser.add_argument(
+        "--days",
+        "--day",
+        dest="days",
+        help="Scope defaults to a zero-based day selector, e.g. `1` or `0-2`.",
     )
     return parser.parse_args()
 
@@ -230,10 +251,18 @@ def write_json_atomically(path: Path, data: Any) -> None:
 def main() -> int:
     args = parse_args()
     discovery_dir = args.discovery_dir.resolve()
-    combined_path = (args.combined or discovery_dir / "02a_combined" / "combined.json").resolve()
-    bridges_path = (args.bridges or discovery_dir / "02b_bridges" / "bridges.json").resolve()
+    slug = scope_slug(args)
+    combined_path = (
+        args.combined
+        or scoped_stage_dir(discovery_dir, "02a_combined", slug) / "combined.json"
+    ).resolve()
+    bridges_path = (
+        args.bridges
+        or scoped_stage_dir(discovery_dir, "02b_bridges", slug) / "bridges.json"
+    ).resolve()
     output_path = (
-        args.output or discovery_dir / "02c_suggestion_inputs" / "inputs.json"
+        args.output
+        or scoped_stage_dir(discovery_dir, "02c_suggestion_inputs", slug) / "inputs.json"
     ).resolve()
 
     if not combined_path.exists():

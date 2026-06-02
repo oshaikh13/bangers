@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from discovery.banger_manifest import write_combined_bangers_file
+from discovery.scoping import scoped_stage_dir, scope_slug
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -34,7 +35,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help=(
             "Directory containing bangers_*.json files. Defaults to "
-            "<discovery-dir>/03_bangers."
+            "scoped <discovery-dir>/03_bangers."
         ),
     )
     parser.add_argument(
@@ -52,6 +53,16 @@ def parse_args() -> argparse.Namespace:
         "--json-output",
         type=Path,
         help="JSON output path. Defaults to combined_bangers.json in the bangers directory.",
+    )
+    parser.add_argument(
+        "--interval-indexes",
+        help="Scope defaults to an interval selector, e.g. `2-42`.",
+    )
+    parser.add_argument(
+        "--days",
+        "--day",
+        dest="days",
+        help="Scope defaults to a zero-based day selector, e.g. `1` or `0-2`.",
     )
     return parser.parse_args()
 
@@ -225,7 +236,11 @@ def render_markdown(opportunities: list[dict[str, Any]]) -> str:
 
 def main() -> int:
     args = parse_args()
-    bangers_dir = (args.bangers_dir or args.discovery_dir / "03_bangers").resolve()
+    slug = scope_slug(args)
+    bangers_dir = (
+        args.bangers_dir
+        or scoped_stage_dir(args.discovery_dir, "03_bangers", slug)
+    ).resolve()
     if not bangers_dir.exists():
         raise SystemExit(f"bangers directory not found: {bangers_dir}")
 

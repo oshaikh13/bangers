@@ -15,6 +15,7 @@ from .paths import (
     default_intervals_path,
 )
 from .runner import run
+from .scoping import scoped_stage_dir, scope_slug
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,6 +93,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Discovery run directory. Defaults to discovery_<provider>_<minutes>m.",
     )
     parser.add_argument(
+        "--goals-dir",
+        help="Goals output/input directory. Defaults to scoped <discovery-dir>/01_goals.",
+    )
+    parser.add_argument(
+        "--combined-dir",
+        help="Combined goals directory. Defaults to scoped <discovery-dir>/02a_combined.",
+    )
+    parser.add_argument(
+        "--bridges-dir",
+        help="Bridge goals directory. Defaults to scoped <discovery-dir>/02b_bridges.",
+    )
+    parser.add_argument(
+        "--suggestion-inputs-dir",
+        help=(
+            "Banger suggestion input directory. Defaults to scoped "
+            "<discovery-dir>/02c_suggestion_inputs."
+        ),
+    )
+    parser.add_argument(
+        "--bangers-dir",
+        help="Bangers directory. Defaults to scoped <discovery-dir>/03_bangers.",
+    )
+    parser.add_argument(
+        "--questions-dir",
+        help="Questions directory. Defaults to scoped <discovery-dir>/04_questions.",
+    )
+    parser.add_argument(
         "--run-log",
         help="JSONL run ledger written by this runner. Defaults inside --discovery-dir.",
     )
@@ -104,8 +132,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--day",
         dest="days",
         help=(
-            "Comma-separated zero-based day numbers or ranges to run, e.g. "
-            "`0` or `0-4`. Days are derived from interval row start dates."
+            "Comma-separated zero-based day numbers or ranges to run and scope "
+            "outputs, e.g. `0` or `0-4`. Days are derived from interval row "
+            "start dates."
         ),
     )
     parser.add_argument(
@@ -338,11 +367,6 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--banger-batch-size must be greater than 0")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
-    if (args.questions or args.bangers) and (args.interval_indexes or args.days):
-        raise SystemExit(
-            "--interval-indexes/--days select discovery intervals; use "
-            "--banger-input-indexes with --bangers or --questions"
-        )
     if args.banger_input_indexes and not (args.questions or args.bangers):
         raise SystemExit("--banger-input-indexes requires --bangers or --questions")
 
@@ -370,12 +394,37 @@ def normalize_args(args: argparse.Namespace) -> None:
             interval_minutes,
         )
 
-    args.goals_dir = args.discovery_dir / "01_goals"
-    args.combined_dir = args.discovery_dir / "02a_combined"
-    args.bridges_dir = args.discovery_dir / "02b_bridges"
-    args.suggestion_inputs_dir = args.discovery_dir / "02c_suggestion_inputs"
-    args.bangers_dir = args.discovery_dir / "03_bangers"
-    args.questions_dir = args.discovery_dir / "04_questions"
+    args.scope_slug = scope_slug(args)
+    args.goals_dir = (
+        Path(args.goals_dir)
+        if args.goals_dir
+        else scoped_stage_dir(args.discovery_dir, "01_goals", args.scope_slug)
+    )
+    args.combined_dir = (
+        Path(args.combined_dir)
+        if args.combined_dir
+        else scoped_stage_dir(args.discovery_dir, "02a_combined", args.scope_slug)
+    )
+    args.bridges_dir = (
+        Path(args.bridges_dir)
+        if args.bridges_dir
+        else scoped_stage_dir(args.discovery_dir, "02b_bridges", args.scope_slug)
+    )
+    args.suggestion_inputs_dir = (
+        Path(args.suggestion_inputs_dir)
+        if args.suggestion_inputs_dir
+        else scoped_stage_dir(args.discovery_dir, "02c_suggestion_inputs", args.scope_slug)
+    )
+    args.bangers_dir = (
+        Path(args.bangers_dir)
+        if args.bangers_dir
+        else scoped_stage_dir(args.discovery_dir, "03_bangers", args.scope_slug)
+    )
+    args.questions_dir = (
+        Path(args.questions_dir)
+        if args.questions_dir
+        else scoped_stage_dir(args.discovery_dir, "04_questions", args.scope_slug)
+    )
 
     if args.run_log:
         args.run_log = Path(args.run_log)

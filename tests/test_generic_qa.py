@@ -60,10 +60,8 @@ class GenericQATests(unittest.TestCase):
     def test_day_alias_uses_day_scoped_final_path(self) -> None:
         args = parse_args(["--day", "0-2"])
 
-        self.assertEqual(
-            final_generic_qa_path(args).name,
-            "final_qa_days_0-2.json",
-        )
+        self.assertEqual(args.generic_qa_dir.name, "days_0-2")
+        self.assertEqual(final_generic_qa_path(args).name, "final_qa.json")
 
     def test_parse_qa_types_expands_all_and_dedupes_specific_types(self) -> None:
         self.assertIn("activity_window", parse_qa_types("all"))

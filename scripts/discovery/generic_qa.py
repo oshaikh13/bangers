@@ -34,6 +34,7 @@ from .runner import (
     create_isolated_workdir,
     write_json_atomically,
 )
+from .scoping import scoped_stage_dir, scope_slug, selector_slug
 
 
 QA_TYPES = (
@@ -103,7 +104,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--generic-qa-dir",
-        help="Pipeline 10 output directory. Defaults to <discovery-dir>/10_generic_qa.",
+        help=(
+            "Pipeline 10 output directory. Defaults to scoped "
+            "<discovery-dir>/10_generic_qa."
+        ),
     )
     parser.add_argument(
         "--run-log",
@@ -244,10 +248,11 @@ def normalize_args(args: argparse.Namespace) -> None:
         if args.discovery_dir
         else default_discovery_dir(args.provider, interval_minutes)
     ).resolve()
+    args.scope_slug = scope_slug(args)
     args.generic_qa_dir = (
         Path(args.generic_qa_dir)
         if args.generic_qa_dir
-        else args.discovery_dir / "10_generic_qa"
+        else scoped_stage_dir(args.discovery_dir, "10_generic_qa", args.scope_slug)
     ).resolve()
     args.run_log = (
         Path(args.run_log)
@@ -587,22 +592,10 @@ def remove_stale_final_if_needed(path: Path) -> None:
 
 
 def interval_indexes_slug(raw: str) -> str:
-    return (
-        raw.strip()
-        .replace(",", "_")
-        .replace("-", "-")
-        .replace(" ", "")
-        or "selected"
-    )
+    return selector_slug(raw)
 
 
 def final_generic_qa_path(args: argparse.Namespace) -> Path:
-    interval_indexes = getattr(args, "interval_indexes", None)
-    days = getattr(args, "days", None)
-    if interval_indexes:
-        return args.generic_qa_dir / f"final_qa_intervals_{interval_indexes_slug(interval_indexes)}.json"
-    if days:
-        return args.generic_qa_dir / f"final_qa_days_{interval_indexes_slug(days)}.json"
     return args.generic_qa_dir / "final_qa.json"
 
 

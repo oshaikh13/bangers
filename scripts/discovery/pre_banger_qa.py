@@ -41,6 +41,7 @@ from .runner import (
     create_isolated_workdir,
     write_json_atomically,
 )
+from .scoping import scoped_stage_dir, scope_slug, selector_slug
 
 
 QA_TYPES = (
@@ -112,7 +113,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--bangers-dir",
-        help="Directory containing 03_bangers output. Defaults to <discovery-dir>/03_bangers.",
+        help=(
+            "Directory containing 03_bangers output. Defaults to scoped "
+            "<discovery-dir>/03_bangers."
+        ),
     )
     parser.add_argument(
         "--combined-bangers-path",
@@ -125,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--pre-banger-qa-dir",
         help=(
             "Pipeline 20 output directory. Defaults to "
-            "<discovery-dir>/20_pre_banger_qa."
+            "scoped <discovery-dir>/20_pre_banger_qa."
         ),
     )
     parser.add_argument(
@@ -297,13 +301,7 @@ def banger_input_indexes_arg(args: argparse.Namespace) -> str | None:
 
 
 def interval_indexes_slug(raw: str) -> str:
-    return (
-        raw.strip()
-        .replace(",", "_")
-        .replace("-", "-")
-        .replace(" ", "")
-        or "selected"
-    )
+    return selector_slug(raw)
 
 
 def default_seed_filter_path(pre_banger_qa_dir: Path) -> Path:
@@ -311,8 +309,6 @@ def default_seed_filter_path(pre_banger_qa_dir: Path) -> Path:
 
 
 def scoped_seed_filter_path(args: argparse.Namespace) -> Path:
-    if args.days:
-        return args.pre_banger_qa_dir / f"seed_rankings_days_{interval_indexes_slug(args.days)}.json"
     return default_seed_filter_path(args.pre_banger_qa_dir)
 
 
@@ -349,8 +345,11 @@ def normalize_args(args: argparse.Namespace) -> None:
         if args.discovery_dir
         else default_discovery_dir(args.provider, interval_minutes)
     ).resolve()
+    args.scope_slug = scope_slug(args)
     args.bangers_dir = (
-        Path(args.bangers_dir) if args.bangers_dir else args.discovery_dir / "03_bangers"
+        Path(args.bangers_dir)
+        if args.bangers_dir
+        else scoped_stage_dir(args.discovery_dir, "03_bangers", args.scope_slug)
     ).resolve()
     args.combined_bangers_path = (
         Path(args.combined_bangers_path)
@@ -360,7 +359,7 @@ def normalize_args(args: argparse.Namespace) -> None:
     args.pre_banger_qa_dir = (
         Path(args.pre_banger_qa_dir)
         if args.pre_banger_qa_dir
-        else args.discovery_dir / "20_pre_banger_qa"
+        else scoped_stage_dir(args.discovery_dir, "20_pre_banger_qa", args.scope_slug)
     ).resolve()
     args.run_log = (
         Path(args.run_log)
@@ -1275,12 +1274,6 @@ def remove_stale_final_if_needed(path: Path) -> None:
 
 
 def final_pre_banger_qa_path(args: argparse.Namespace) -> Path:
-    interval_indexes = getattr(args, "interval_indexes", None)
-    days = getattr(args, "days", None)
-    if interval_indexes:
-        return args.pre_banger_qa_dir / f"final_qa_intervals_{interval_indexes_slug(interval_indexes)}.json"
-    if days:
-        return args.pre_banger_qa_dir / f"final_qa_days_{interval_indexes_slug(days)}.json"
     return args.pre_banger_qa_dir / "final_qa.json"
 
 

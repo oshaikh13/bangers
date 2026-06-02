@@ -46,21 +46,22 @@ class PreBangerQATests(unittest.TestCase):
             ["curiosity", "threaded"],
         )
 
-    def test_interval_runs_reuse_global_seed_ranking_path(self) -> None:
+    def test_interval_runs_use_interval_scoped_paths(self) -> None:
         args = parse_args(["--interval-indexes", "40-49"])
 
+        self.assertEqual(args.bangers_dir.name, "intervals_40-49")
+        self.assertEqual(args.pre_banger_qa_dir.name, "intervals_40-49")
         self.assertEqual(args.seed_filter_path.name, "seed_rankings.json")
         self.assertEqual(args.combined_bangers_path.name, "combined_bangers.json")
 
     def test_day_runs_use_day_scoped_seed_ranking_path(self) -> None:
         args = parse_args(["--day", "0-2"])
 
-        self.assertEqual(args.seed_filter_path.name, "seed_rankings_days_0-2.json")
+        self.assertEqual(args.bangers_dir.name, "days_0-2")
+        self.assertEqual(args.pre_banger_qa_dir.name, "days_0-2")
+        self.assertEqual(args.seed_filter_path.name, "seed_rankings.json")
         self.assertEqual(args.combined_bangers_path.name, "combined_bangers.json")
-        self.assertEqual(
-            final_pre_banger_qa_path(args).name,
-            "final_qa_days_0-2.json",
-        )
+        self.assertEqual(final_pre_banger_qa_path(args).name, "final_qa.json")
 
     def test_seed_ranking_prompt_and_loader_preserve_scored_order(self) -> None:
         all_seeds = [
@@ -409,7 +410,7 @@ class PreBangerQATests(unittest.TestCase):
                 {"curiosity", "value", "threaded"},
             )
 
-    def test_write_final_pre_banger_qa_uses_interval_specific_filename(self) -> None:
+    def test_write_final_pre_banger_qa_uses_scoped_final_filename(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             pre_banger_dir = Path(tmp_dir) / "20_pre_banger_qa"
             flat_dir = pre_banger_dir / "timing"
@@ -425,10 +426,9 @@ class PreBangerQATests(unittest.TestCase):
 
             write_final_pre_banger_qa(args)
 
-            final_path = pre_banger_dir / "final_qa_intervals_40-49.json"
+            final_path = pre_banger_dir / "final_qa.json"
             self.assertEqual(final_pre_banger_qa_path(args), final_path)
             self.assertTrue(final_path.exists())
-            self.assertFalse((pre_banger_dir / "final_qa.json").exists())
 
     def test_training_export_flattens_shapes_and_drops_seed_metadata(self) -> None:
         rows = training_rows_from_final_questions(

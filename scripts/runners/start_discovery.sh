@@ -88,11 +88,22 @@ esac
 discovery_dir="discovery_${provider}_${interval_minutes}m"
 day_args=()
 day_suffix=""
+scope_slug="global"
 if [[ -n "$day_selector" ]]; then
   day_args=(--day "$day_selector")
   day_suffix="${day_selector//,/_}"
   day_suffix="${day_suffix// /}"
+  scope_slug="days_${day_suffix}"
 fi
+
+stage_dir() {
+  local stage="$1"
+  if [[ "$scope_slug" == "global" ]]; then
+    printf '%s/%s' "$discovery_dir" "$stage"
+  else
+    printf '%s/%s/%s' "$discovery_dir" "$stage" "$scope_slug"
+  fi
+}
 
 run_setup() {
   if [[ "$skip_setup" == "true" ]]; then
@@ -116,35 +127,41 @@ run_aggregate_discovery() {
   uv run scripts/runners/run_discovery_combine.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
+    "${day_args[@]}" \
     --force
 
   uv run scripts/runners/run_discovery_bridges.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
+    "${day_args[@]}" \
     --force
 
   uv run scripts/build_suggestion_inputs.py \
-    --discovery-dir "$discovery_dir"
+    --discovery-dir "$discovery_dir" \
+    "${day_args[@]}"
 
   uv run scripts/runners/run_discovery_bangers.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
+    "${day_args[@]}" \
     --jobs "$jobs" \
     --banger-batch-size "$banger_batch_size" \
     --continue-on-error
 
   uv run scripts/combine_bangers.py \
-    --discovery-dir "$discovery_dir"
+    --discovery-dir "$discovery_dir" \
+    "${day_args[@]}"
 
   uv run scripts/runners/run_discovery_questions.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
+    "${day_args[@]}" \
     --jobs "$jobs" \
     --continue-on-error
 
   uv run scripts/export_training_questions.py \
-    --input "$discovery_dir/04_questions/final_questions.json" \
-    --output "$discovery_dir/04_questions/training_questions.jsonl"
+    --input "$(stage_dir 04_questions)/final_questions.json" \
+    --output "$(stage_dir 04_questions)/training_questions.jsonl"
 }
 
 run_generic_qa() {
@@ -156,12 +173,8 @@ run_generic_qa() {
     --jobs "$jobs" \
     --continue-on-error
 
-  local input="$discovery_dir/10_generic_qa/final_qa.json"
-  local output="$discovery_dir/10_generic_qa/training_questions.jsonl"
-  if [[ -n "$day_suffix" ]]; then
-    input="$discovery_dir/10_generic_qa/final_qa_days_${day_suffix}.json"
-    output="$discovery_dir/10_generic_qa/training_questions_days_${day_suffix}.jsonl"
-  fi
+  local input="$(stage_dir 10_generic_qa)/final_qa.json"
+  local output="$(stage_dir 10_generic_qa)/training_questions.jsonl"
 
   uv run scripts/export_training_questions.py \
     --input "$input" \
@@ -177,12 +190,8 @@ run_pre_banger_qa() {
     --jobs "$jobs" \
     --continue-on-error
 
-  local input="$discovery_dir/20_pre_banger_qa/final_qa.json"
-  local output="$discovery_dir/20_pre_banger_qa/training_questions.jsonl"
-  if [[ -n "$day_suffix" ]]; then
-    input="$discovery_dir/20_pre_banger_qa/final_qa_days_${day_suffix}.json"
-    output="$discovery_dir/20_pre_banger_qa/training_questions_days_${day_suffix}.jsonl"
-  fi
+  local input="$(stage_dir 20_pre_banger_qa)/final_qa.json"
+  local output="$(stage_dir 20_pre_banger_qa)/training_questions.jsonl"
 
   uv run scripts/export_training_questions.py \
     --input "$input" \

@@ -331,6 +331,14 @@ def goal_files(goals_dir: Path) -> list[Path]:
     return sorted(goals_dir.glob("goal_*.json"))
 
 
+def combine_goal_files(args: argparse.Namespace) -> list[Path]:
+    if getattr(args, "scope_slug", "global") != "global":
+        return goal_files(args.goals_dir)
+
+    base_goals_dir = args.discovery_dir / "01_goals"
+    return sorted(base_goals_dir.glob("days_*/goal_*.json"))
+
+
 def validate_combined_json(path: Path) -> None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -480,6 +488,7 @@ def validate_questions_data(data: Any, path: Path | str) -> None:
 def print_combine_dry_run(args: argparse.Namespace, template: str) -> None:
     isolated_workdir: Path | None = None
     combined_path = args.combined_dir / "combined.json"
+    files = combine_goal_files(args)
     if args.no_isolate_agent_workdir:
         agent_workdir = args.repo_root
         agent_goals_dir = args.goals_dir
@@ -493,7 +502,7 @@ def print_combine_dry_run(args: argparse.Namespace, template: str) -> None:
         isolated_workdir = agent_workdir
         agent_goals_dir = agent_workdir / "agent-input" / "goals"
         agent_goals_dir.mkdir(parents=True)
-        for path in goal_files(args.goals_dir):
+        for path in files:
             copy_file_atomically(path, agent_goals_dir / path.name)
         agent_combined_path = agent_workdir / "agent-output" / "combined.json"
 
@@ -521,7 +530,7 @@ def print_combine_dry_run(args: argparse.Namespace, template: str) -> None:
 
 def run_combine_once(args: argparse.Namespace, template: str) -> CombineResult:
     combined_path = args.combined_dir / "combined.json"
-    files = goal_files(args.goals_dir)
+    files = combine_goal_files(args)
 
     isolated_workdir: Path | None = None
     if args.no_isolate_agent_workdir:
@@ -602,7 +611,7 @@ def run_combine(args: argparse.Namespace) -> int:
         raise SystemExit(f"repo root not found: {args.repo_root}")
     if not args.goals_dir.exists():
         raise SystemExit(f"goals directory not found: {args.goals_dir}")
-    files = goal_files(args.goals_dir)
+    files = combine_goal_files(args)
     if not files:
         raise SystemExit(f"no goal_*.json files found in {args.goals_dir}")
 
