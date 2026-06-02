@@ -137,6 +137,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--interval-indexes",
         help="Comma-separated interval indexes or ranges to run, e.g. `0,3,10-12`.",
     )
+    parser.add_argument(
+        "--days",
+        help=(
+            "Comma-separated zero-based day numbers or ranges to run, e.g. "
+            "`0` or `0-4`. Days are derived from interval row start dates."
+        ),
+    )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
     parser.add_argument("--limit", type=int, help="Maximum number of interval rows to run.")
     parser.add_argument(
@@ -622,6 +629,7 @@ def run(args: argparse.Namespace) -> int:
     rows = select_rows(
         read_jsonl(args.intervals),
         args.interval_indexes,
+        args.days,
         args.start,
         args.limit,
     )

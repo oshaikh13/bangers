@@ -83,24 +83,29 @@ uv run scripts/export_training_questions.py \
 
 Use `PROVIDER=claude` to run with Claude instead of Codex.
 For pipeline 20, `--qa-types all` runs the default non-overlapping set:
-`timing,curiosity,disregard,threaded`. The `threaded` type is a multi-turn
-shape built from the same three lanes, not a separate semantic category.
-Pipeline 20 ranks seeds globally across all bangers; interval selectors only
-filter which already-ranked seeds get QA generated. The ranker reads
+`timing,curiosity,disregard,value,threaded`. The `value` type asks for a
+continuous 1 to 100 estimate of how worthwhile proactive help would be. The
+`threaded` type is a multi-turn shape built from timing, curiosity, and
+self-done arcs, not a separate semantic category.
+Pipeline 20 groups banger seeds by UTC day, ranks each day's concatenated
+suggestions in parallel using `--jobs`, then writes a stitched
+`seed_rankings.json`. Interval selectors only filter which already-ranked seeds
+get QA generated. The ranker reads daily files derived from
 `$DISCOVERY_DIR/03_bangers/combined_bangers.json`, which is written by
 `scripts/combine_bangers.py` and refreshed by pipeline 20 before ranking.
 
 ## Shard Large Runs
 
-For a smaller or parallel shard, add the same interval selector to interval-based
-stages:
+For a smaller or parallel shard, add the same day or interval selector to
+interval-based stages. `--days` is zero-based and derived from interval row start
+dates:
 
 ```bash
-export RANGE=0-99
+export DAYS=0-4
 
-uv run scripts/runners/run_discovery_goals.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --interval-indexes "$RANGE" --jobs 4
-uv run scripts/runners/run_generic_qa.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --interval-indexes "$RANGE" --qa-types all --jobs 4
-uv run scripts/runners/run_pre_banger_qa.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --interval-indexes "$RANGE" --qa-types all --jobs 4
+uv run scripts/runners/run_discovery_goals.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --days "$DAYS" --jobs 4
+uv run scripts/runners/run_generic_qa.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --days "$DAYS" --qa-types all --jobs 4
+uv run scripts/runners/run_pre_banger_qa.py --provider "$PROVIDER" --interval-minutes "$INTERVAL" --days "$DAYS" --qa-types all --jobs 4
 ```
 
 Then run the combine, bridge, suggestion-input, banger, question, and export
