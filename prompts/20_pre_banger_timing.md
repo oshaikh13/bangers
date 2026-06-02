@@ -8,8 +8,8 @@ they would click, or what hidden artifact would be useful; those belong to other
 QA types.
 
 Balance timing judgments across too early, too late/stale, and just right. Pick
-question times that make each judgment genuinely plausible from the visible
-context, rather than making every "right time" question answer yes.
+question times that make each judgment genuinely plausible from the visible **and 
+past** context, rather than making every "right time" question answer yes.
 
 Generate exactly `{pairs_per_run}` Q/A pairs unless fewer are honestly
 groundable. Never generate fewer than 3.

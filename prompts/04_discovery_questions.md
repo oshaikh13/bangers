@@ -33,12 +33,11 @@ when the banger's value is acting before the user does; lean toward
 recall and current state when grounding the artifact matters most.
 
 
-The question is asked at a specific timestamp. The past before this is the history **H** 
-The model has no access to the future.
-You, the labeler, have both H and the **future** logs (call this window
-**F**) — search `logs-indexed/` freely in both directions. Use F to ground
-ground-truth answers; the user model has to learn to predict those answers
-from H alone.
+The question is asked at a specific timestamp. The past before this is the 
+history **H** The model has no access to the future. You, the labeler, have 
+both H and the **future** logs (call this window **F**) — search `logs-indexed/` 
+freely in both directions. Use F to ground ground-truth answers; the user 
+model has to learn to predict those answers from H alone.
 
 For question generation you MAY use the future to determine the answer,
 but the **question and answer text themselves must not reference the
@@ -46,9 +45,14 @@ future**. Write the answer as a confident statement the user model would
 make from inside H. The hindsight evidence goes in `evidence_grounding`,
 which is dropped before training.
 
-- You MUST search through additional logs (in the `logs-indexed/` folder). Use the times to identify relevant logs.
+- You MUST search through additional logs (in the `logs-indexed/` folder). 
+Use the times to identify relevant logs.
 
-- To answer questions about what the user writes, sends, or says (e.g. "how would the user reply to this email?"), **lift the exact text verbatim** from the user's actual reply in the logs. Look carefully at the user's prior messages for style cues. Don't paraphrase a verbatim artifact; if the exact text isn't recoverable, pick a different question.
+- To answer questions about what the user writes, sends, or says (e.g. "how 
+would the  user reply to this email?"), **lift the exact text verbatim** from 
+the user's actual reply in the logs. Look carefully at the user's prior messages 
+for style cues. Don't paraphrase a verbatim artifact; if the exact text isn't 
+recoverable, pick a different question.
 
 ## Input
 
@@ -92,7 +96,7 @@ Each question should still be specific enough to be useful and phrased
 the way an assistant would actually ask — short, natural, one thing per
 question.
 
-Good Q/A pairs cover any mix of the three modes:
+Good Q/A pairs COVER these three modes:
 
 **Forecast (answered from F):**
 - How will the user act next — which path, which file, which message,
