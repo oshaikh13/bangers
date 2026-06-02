@@ -25,17 +25,45 @@ PRE_BANGER_QA_FILE_PATTERN = re.compile(r"^qa_(.+)\.json$")
 PRE_BANGER_QA_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 PRE_BANGER_SEED_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 LOGS_INDEXED_DIR = REPO_ROOT / "logs-indexed"
-COMBINED_RELATIVE_PATHS = (
-    "02a_combined/combined.json",
-    "02_combined/combined.json",
+
+# Stage directories that day/interval sharding nests scope subdirs under.
+SCOPED_STAGE_DIRS = (
+    "01_goals",
+    "02a_combined",
+    "02_combined",
+    "02b_bridges",
+    "02c_suggestion_inputs",
+    "03_bangers",
+    "04_questions",
+    GENERIC_QA_DIR,
+    PRE_BANGER_QA_DIR,
 )
+# Scope subdir names emitted by scripts/discovery/scoping.py (days_<sel>, intervals_<sel>).
+SCOPE_DIR_PATTERN = re.compile(r"^(?:days|intervals)_.+$")
+# Strict validator (no path separators) for scope values that arrive over the API.
+VALID_SCOPE_PATTERN = re.compile(r"^(?:global|(?:days|intervals)_[A-Za-z0-9_\-]+)$")
+GLOBAL_SCOPE = "global"
+
+COMBINED_STAGE_DIRS = ("02a_combined", "02_combined")
 
 _INDEXED_EVENTS_CACHE: list[dict[str, Any]] | None = None
 
 
-def resolve_combined_path(run_path: Path) -> Path | None:
-    for relative in COMBINED_RELATIVE_PATHS:
-        path = run_path / relative
+def scoped_dir(run_path: Path, stage: str, scope: str = GLOBAL_SCOPE) -> Path:
+    """Resolve a stage directory for a given scope.
+
+    Global scope reads the bare stage dir (legacy/unsharded layout); a day or
+    interval scope reads the matching subdir written by the sharded runners.
+    """
+    base = run_path / stage
+    if scope == GLOBAL_SCOPE:
+        return base
+    return base / scope
+
+
+def resolve_combined_path(run_path: Path, scope: str = GLOBAL_SCOPE) -> Path | None:
+    for stage in COMBINED_STAGE_DIRS:
+        path = scoped_dir(run_path, stage, scope) / "combined.json"
         if path.is_file():
             return path
     return None
@@ -54,21 +82,63 @@ class RunInfo:
     has_pre_banger_qa: bool
 
 
+def _scope_sort_key(name: str) -> list[Any]:
+    """Natural-sort key so days_2 sorts before days_10."""
+    return [int(chunk) if chunk.isdigit() else chunk for chunk in re.split(r"(\d+)", name)]
+
+
+def list_run_scopes(run_path: Path) -> list[str]:
+    """Available scopes for a run: global first when the unsharded layout has
+    content, followed by each day/interval shard found on disk."""
+    scope_names: set[str] = set()
+    for stage in SCOPED_STAGE_DIRS:
+        stage_dir = run_path / stage
+        if not stage_dir.is_dir():
+            continue
+        for child in stage_dir.iterdir():
+            if child.is_dir() and SCOPE_DIR_PATTERN.match(child.name):
+                scope_names.add(child.name)
+
+    ordered = sorted(scope_names, key=_scope_sort_key)
+
+    global_run = describe_run(run_path, GLOBAL_SCOPE)
+    has_global = any(
+        (
+            global_run.has_goals,
+            global_run.has_combined,
+            global_run.has_bangers,
+            global_run.has_questions,
+            global_run.has_generic_qa,
+            global_run.has_pre_banger_qa,
+        )
+    )
+
+    scopes: list[str] = []
+    if has_global:
+        scopes.append(GLOBAL_SCOPE)
+    scopes.extend(ordered)
+    return scopes or [GLOBAL_SCOPE]
+
+
+def default_scope(run_path: Path) -> str:
+    return list_run_scopes(run_path)[0]
+
+
 def list_discovery_runs(repo_root: Path = REPO_ROOT) -> list[RunInfo]:
     runs: list[RunInfo] = []
     for path in sorted(repo_root.glob("discovery_*")):
         if not path.is_dir():
             continue
-        runs.append(describe_run(path))
+        runs.append(describe_run(path, default_scope(path)))
     runs.sort(key=_run_sort_key, reverse=True)
     return runs
 
 
 def _run_sort_key(run: RunInfo) -> tuple[int, float]:
-    goals_dir = run.path / "01_goals"
+    goals_root = run.path / "01_goals"
     goal_files = [
         path
-        for path in goals_dir.glob("goal_*.json")
+        for path in goals_root.rglob("goal_*.json")
         if GOAL_PATTERN.match(path.name)
     ]
     latest_mtime = max((path.stat().st_mtime for path in goal_files), default=0.0)
@@ -89,19 +159,19 @@ def default_run_name(repo_root: Path = REPO_ROOT) -> str | None:
     return runs[0].name if runs else None
 
 
-def describe_run(path: Path) -> RunInfo:
-    goals_dir = path / "01_goals"
-    bangers_dir = path / "03_bangers"
-    questions_dir = path / "04_questions"
-    generic_qa_dir = path / GENERIC_QA_DIR
-    pre_banger_qa_dir = path / PRE_BANGER_QA_DIR
+def describe_run(path: Path, scope: str = GLOBAL_SCOPE) -> RunInfo:
+    goals_dir = scoped_dir(path, "01_goals", scope)
+    bangers_dir = scoped_dir(path, "03_bangers", scope)
+    questions_dir = scoped_dir(path, "04_questions", scope)
+    generic_qa_dir = scoped_dir(path, GENERIC_QA_DIR, scope)
+    pre_banger_qa_dir = scoped_dir(path, PRE_BANGER_QA_DIR, scope)
     final_questions = questions_dir / "final_questions.json"
     goal_count = 0
     if goals_dir.is_dir():
         try:
-            goal_count = len(load_all_goals(path))
+            goal_count = len(load_all_goals(path, scope))
         except (ValueError, OSError):
-            goal_count = len(list_goal_intervals(path))
+            goal_count = len(list_goal_intervals(path, scope))
     has_generic_qa = generic_qa_dir.is_dir() and any(
         generic_qa_dir.glob("*/qa_*.json")
     )
@@ -113,7 +183,7 @@ def describe_run(path: Path) -> RunInfo:
         path=path,
         goal_count=goal_count,
         has_goals=goal_count > 0,
-        has_combined=resolve_combined_path(path) is not None,
+        has_combined=resolve_combined_path(path, scope) is not None,
         has_bangers=any(bangers_dir.glob("bangers_*.json"))
         or any(bangers_dir.glob("banger_*.json")),
         has_questions=final_questions.is_file() or any(
@@ -128,8 +198,8 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def list_goal_intervals(run_path: Path) -> list[dict[str, Any]]:
-    goals_dir = run_path / "01_goals"
+def list_goal_intervals(run_path: Path, scope: str = GLOBAL_SCOPE) -> list[dict[str, Any]]:
+    goals_dir = scoped_dir(run_path, "01_goals", scope)
     intervals: list[dict[str, Any]] = []
     for path in sorted(goals_dir.glob("goal_*.json")):
         match = GOAL_PATTERN.match(path.name)
@@ -141,8 +211,8 @@ def list_goal_intervals(run_path: Path) -> list[dict[str, Any]]:
     return intervals
 
 
-def load_goal(run_path: Path, interval: int) -> list[dict[str, Any]]:
-    path = run_path / "01_goals" / f"goal_{interval}.json"
+def load_goal(run_path: Path, interval: int, scope: str = GLOBAL_SCOPE) -> list[dict[str, Any]]:
+    path = scoped_dir(run_path, "01_goals", scope) / f"goal_{interval}.json"
     if not path.is_file():
         raise FileNotFoundError(f"goal file not found: goal_{interval}.json")
     data = load_json(path)
@@ -151,11 +221,11 @@ def load_goal(run_path: Path, interval: int) -> list[dict[str, Any]]:
     return data
 
 
-def load_all_goals(run_path: Path) -> list[dict[str, Any]]:
+def load_all_goals(run_path: Path, scope: str = GLOBAL_SCOPE) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for interval_info in list_goal_intervals(run_path):
+    for interval_info in list_goal_intervals(run_path, scope):
         interval = interval_info["interval_index"]
-        for rank, goal in enumerate(load_goal(run_path, interval), start=1):
+        for rank, goal in enumerate(load_goal(run_path, interval, scope), start=1):
             if not isinstance(goal, dict):
                 continue
             items.append(
@@ -169,8 +239,8 @@ def load_all_goals(run_path: Path) -> list[dict[str, Any]]:
     return items
 
 
-def load_combined(run_path: Path) -> list[dict[str, Any]]:
-    path = resolve_combined_path(run_path)
+def load_combined(run_path: Path, scope: str = GLOBAL_SCOPE) -> list[dict[str, Any]]:
+    path = resolve_combined_path(run_path, scope)
     if path is None:
         raise FileNotFoundError("combined.json not found")
     data = load_json(path)
@@ -179,8 +249,8 @@ def load_combined(run_path: Path) -> list[dict[str, Any]]:
     return data
 
 
-def list_banger_indexes(run_path: Path) -> list[dict[str, Any]]:
-    bangers_dir = run_path / "03_bangers"
+def list_banger_indexes(run_path: Path, scope: str = GLOBAL_SCOPE) -> list[dict[str, Any]]:
+    bangers_dir = scoped_dir(run_path, "03_bangers", scope)
     indexes: list[dict[str, Any]] = []
     paths = sorted(
         [*bangers_dir.glob("bangers_*.json"), *bangers_dir.glob("banger_*.json")]
@@ -210,8 +280,8 @@ def list_banger_indexes(run_path: Path) -> list[dict[str, Any]]:
     return indexes
 
 
-def load_banger(run_path: Path, combined_index: int) -> dict[str, Any]:
-    bangers_dir = run_path / "03_bangers"
+def load_banger(run_path: Path, combined_index: int, scope: str = GLOBAL_SCOPE) -> dict[str, Any]:
+    bangers_dir = scoped_dir(run_path, "03_bangers", scope)
     legacy_path = bangers_dir / f"banger_{combined_index}.json"
     if legacy_path.is_file():
         data = load_json(legacy_path)
@@ -236,8 +306,9 @@ def load_banger(run_path: Path, combined_index: int) -> dict[str, Any]:
     raise FileNotFoundError(f"banger file not found for input {combined_index}")
 
 
-def list_questions(run_path: Path) -> list[dict[str, Any]]:
-    final_path = run_path / "04_questions" / "final_questions.json"
+def list_questions(run_path: Path, scope: str = GLOBAL_SCOPE) -> list[dict[str, Any]]:
+    questions_dir = scoped_dir(run_path, "04_questions", scope)
+    final_path = questions_dir / "final_questions.json"
     if final_path.is_file():
         data = load_json(final_path)
         if not isinstance(data, list):
@@ -254,7 +325,6 @@ def list_questions(run_path: Path) -> list[dict[str, Any]]:
             if isinstance(item, dict)
         ]
 
-    questions_dir = run_path / "04_questions"
     items: list[dict[str, Any]] = []
     for path in sorted(questions_dir.glob("question_*.json")):
         match = QUESTION_PATTERN.match(path.name)
@@ -278,8 +348,9 @@ def list_questions(run_path: Path) -> list[dict[str, Any]]:
     return items
 
 
-def load_question(run_path: Path, question_id: str) -> dict[str, Any]:
-    final_path = run_path / "04_questions" / "final_questions.json"
+def load_question(run_path: Path, question_id: str, scope: str = GLOBAL_SCOPE) -> dict[str, Any]:
+    questions_dir = scoped_dir(run_path, "04_questions", scope)
+    final_path = questions_dir / "final_questions.json"
     if final_path.is_file():
         data = load_json(final_path)
         if isinstance(data, list):
@@ -287,7 +358,7 @@ def load_question(run_path: Path, question_id: str) -> dict[str, Any]:
                 if isinstance(item, dict) and item.get("question_id") == question_id:
                     return item
 
-    path = run_path / "04_questions" / f"question_{question_id}.json"
+    path = questions_dir / f"question_{question_id}.json"
     if not path.is_file():
         raise FileNotFoundError(f"question file not found: question_{question_id}.json")
     data = load_json(path)
@@ -301,15 +372,15 @@ def load_question(run_path: Path, question_id: str) -> dict[str, Any]:
     }
 
 
-def build_manifest(run_path: Path) -> dict[str, Any]:
-    run = describe_run(run_path)
-    combined = load_combined(run_path) if run.has_combined else []
-    bangers = list_banger_indexes(run_path) if run.has_bangers else []
-    questions = list_questions(run_path) if run.has_questions else []
-    goals = list_goal_intervals(run_path) if run.has_goals else []
-    generic_qa = list_generic_qa_items(run_path) if run.has_generic_qa else []
+def build_manifest(run_path: Path, scope: str = GLOBAL_SCOPE) -> dict[str, Any]:
+    run = describe_run(run_path, scope)
+    combined = load_combined(run_path, scope) if run.has_combined else []
+    bangers = list_banger_indexes(run_path, scope) if run.has_bangers else []
+    questions = list_questions(run_path, scope) if run.has_questions else []
+    goals = list_goal_intervals(run_path, scope) if run.has_goals else []
+    generic_qa = list_generic_qa_items(run_path, scope) if run.has_generic_qa else []
     pre_banger_qa = (
-        list_pre_banger_qa_items(run_path) if run.has_pre_banger_qa else []
+        list_pre_banger_qa_items(run_path, scope) if run.has_pre_banger_qa else []
     )
 
     combined_items = [
@@ -329,10 +400,11 @@ def build_manifest(run_path: Path) -> dict[str, Any]:
         for index, item in enumerate(combined)
     ]
 
-    combined_path = resolve_combined_path(run_path)
+    combined_path = resolve_combined_path(run_path, scope)
 
     return {
         "run": run.name,
+        "scope": scope,
         "combined_path": (
             str(combined_path.relative_to(run_path)) if combined_path is not None else None
         ),
@@ -402,8 +474,8 @@ def _generic_qa_pairs(data: Any) -> list[Any]:
     return collected
 
 
-def list_generic_qa_items(run_path: Path) -> list[dict[str, Any]]:
-    base = run_path / GENERIC_QA_DIR
+def list_generic_qa_items(run_path: Path, scope: str = GLOBAL_SCOPE) -> list[dict[str, Any]]:
+    base = scoped_dir(run_path, GENERIC_QA_DIR, scope)
     if not base.is_dir():
         return []
     items: list[dict[str, Any]] = []
@@ -456,10 +528,12 @@ def list_generic_qa_items(run_path: Path) -> list[dict[str, Any]]:
     return items
 
 
-def load_generic_qa(run_path: Path, qa_type: str, interval: int) -> dict[str, Any]:
+def load_generic_qa(
+    run_path: Path, qa_type: str, interval: int, scope: str = GLOBAL_SCOPE
+) -> dict[str, Any]:
     if not GENERIC_QA_TYPE_PATTERN.match(qa_type or ""):
         raise FileNotFoundError(f"invalid qa_type: {qa_type!r}")
-    path = run_path / GENERIC_QA_DIR / qa_type / f"qa_{interval}.json"
+    path = scoped_dir(run_path, GENERIC_QA_DIR, scope) / qa_type / f"qa_{interval}.json"
     if not path.is_file():
         raise FileNotFoundError(
             f"generic qa file not found: {qa_type}/qa_{interval}.json"
@@ -476,8 +550,8 @@ def _parse_timestamp(value: Any) -> float | None:
     return parse_timestamp(value)
 
 
-def list_pre_banger_qa_items(run_path: Path) -> list[dict[str, Any]]:
-    base = run_path / PRE_BANGER_QA_DIR
+def list_pre_banger_qa_items(run_path: Path, scope: str = GLOBAL_SCOPE) -> list[dict[str, Any]]:
+    base = scoped_dir(run_path, PRE_BANGER_QA_DIR, scope)
     if not base.is_dir():
         return []
     items: list[dict[str, Any]] = []
@@ -531,12 +605,14 @@ def list_pre_banger_qa_items(run_path: Path) -> list[dict[str, Any]]:
     return items
 
 
-def load_pre_banger_qa(run_path: Path, qa_type: str, seed_id: str) -> dict[str, Any]:
+def load_pre_banger_qa(
+    run_path: Path, qa_type: str, seed_id: str, scope: str = GLOBAL_SCOPE
+) -> dict[str, Any]:
     if not PRE_BANGER_QA_TYPE_PATTERN.match(qa_type or ""):
         raise FileNotFoundError(f"invalid qa_type: {qa_type!r}")
     if not PRE_BANGER_SEED_ID_PATTERN.match(seed_id or ""):
         raise FileNotFoundError(f"invalid seed_id: {seed_id!r}")
-    path = run_path / PRE_BANGER_QA_DIR / qa_type / f"qa_{seed_id}.json"
+    path = scoped_dir(run_path, PRE_BANGER_QA_DIR, scope) / qa_type / f"qa_{seed_id}.json"
     if not path.is_file():
         raise FileNotFoundError(
             f"pre-banger qa file not found: {qa_type}/qa_{seed_id}.json"

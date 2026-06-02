@@ -8,6 +8,7 @@ phase="all"
 day_selector=""
 banger_batch_size="5"
 skip_setup="false"
+effort=""
 
 usage() {
   cat <<'EOF'
@@ -21,6 +22,10 @@ Options:
   --day RANGE, --days RANGE     Zero-based day selector, e.g. 0 or 1-5
   --phase NAME                  all, setup, interval, aggregate, qa, pre-banger. Default: all
   --banger-batch-size N         Batch size for banger generation. Default: 5
+  --effort LEVEL                Reasoning effort for model stages. Maps to the
+                                provider flag: codex --codex-reasoning-effort
+                                (freeform, default high), claude --claude-effort
+                                (low|medium|high|xhigh|max). Default: runner default.
   --skip-setup                  Skip uv sync, indexing, and interval recording
   -h, --help                    Show this help
 
@@ -60,6 +65,10 @@ while [[ $# -gt 0 ]]; do
       banger_batch_size="$2"
       shift 2
       ;;
+    --effort)
+      effort="$2"
+      shift 2
+      ;;
     --skip-setup)
       skip_setup="true"
       shift
@@ -96,6 +105,14 @@ if [[ -n "$day_selector" ]]; then
   scope_slug="days_${day_suffix}"
 fi
 
+effort_args=()
+if [[ -n "$effort" ]]; then
+  case "$provider" in
+    codex) effort_args=(--codex-reasoning-effort "$effort") ;;
+    claude) effort_args=(--claude-effort "$effort") ;;
+  esac
+fi
+
 stage_dir() {
   local stage="$1"
   if [[ "$scope_slug" == "global" ]]; then
@@ -119,6 +136,7 @@ run_interval_discovery() {
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
+    "${effort_args[@]}" \
     --jobs "$jobs" \
     --continue-on-error
 }
@@ -128,12 +146,14 @@ run_aggregate_discovery() {
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
+    "${effort_args[@]}" \
     --force
 
   uv run scripts/runners/run_discovery_bridges.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
+    "${effort_args[@]}" \
     --force
 
   uv run scripts/build_suggestion_inputs.py \
@@ -144,6 +164,7 @@ run_aggregate_discovery() {
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
+    "${effort_args[@]}" \
     --jobs "$jobs" \
     --banger-batch-size "$banger_batch_size" \
     --continue-on-error
@@ -156,6 +177,7 @@ run_aggregate_discovery() {
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
+    "${effort_args[@]}" \
     --jobs "$jobs" \
     --continue-on-error
 
@@ -169,6 +191,7 @@ run_generic_qa() {
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
+    "${effort_args[@]}" \
     --qa-types all \
     --jobs "$jobs" \
     --continue-on-error
@@ -186,6 +209,7 @@ run_pre_banger_qa() {
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
+    "${effort_args[@]}" \
     --qa-types all \
     --jobs "$jobs" \
     --continue-on-error

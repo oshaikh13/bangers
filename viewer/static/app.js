@@ -1,5 +1,6 @@
 const state = {
   run: null,
+  scope: null,
   tab: "goals",
   manifest: null,
   selection: null,
@@ -9,6 +10,7 @@ const state = {
 
 const layout = document.getElementById("layout");
 const runSelect = document.getElementById("run-select");
+const scopeSelect = document.getElementById("scope-select");
 const listHeader = document.getElementById("list-header");
 const detailHeader = document.getElementById("detail-header");
 const itemList = document.getElementById("item-list");
@@ -30,6 +32,15 @@ async function init() {
 function bindEvents() {
   runSelect.addEventListener("change", async () => {
     state.run = runSelect.value;
+    state.selection = null;
+    await loadScopes();
+    await loadManifest();
+    await refreshCurrentTab();
+    updateHash();
+  });
+
+  scopeSelect.addEventListener("change", async () => {
+    state.scope = scopeSelect.value;
     state.selection = null;
     await loadManifest();
     await refreshCurrentTab();
@@ -86,7 +97,34 @@ async function loadRuns() {
 
   state.run = data.default_run || data.runs[0].name;
   runSelect.value = state.run;
+  await loadScopes();
   await loadManifest();
+}
+
+async function loadScopes() {
+  scopeSelect.innerHTML = "";
+  if (!state.run) {
+    state.scope = null;
+    return;
+  }
+  const data = await fetchJson(`/api/runs/${encodeURIComponent(state.run)}/scopes`);
+  const scopes = data.scopes && data.scopes.length ? data.scopes : ["global"];
+  for (const scope of scopes) {
+    const option = document.createElement("option");
+    option.value = scope;
+    option.textContent = scope;
+    scopeSelect.appendChild(option);
+  }
+  state.scope = data.default || scopes[0];
+  scopeSelect.value = state.scope;
+}
+
+function withScope(url) {
+  if (!state.scope) {
+    return url;
+  }
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}scope=${encodeURIComponent(state.scope)}`;
 }
 
 async function loadManifest() {
@@ -94,7 +132,9 @@ async function loadManifest() {
     state.manifest = null;
     return;
   }
-  state.manifest = await fetchJson(`/api/runs/${encodeURIComponent(state.run)}/manifest`);
+  state.manifest = await fetchJson(
+    withScope(`/api/runs/${encodeURIComponent(state.run)}/manifest`),
+  );
 }
 
 function setActiveTab(tabName, updateButtons = true) {
@@ -167,7 +207,7 @@ async function loadGoalFile(intervalIndex) {
   state.selection = `goals/${intervalIndex}`;
   markActiveSelection();
   const data = await fetchJson(
-    `/api/runs/${encodeURIComponent(state.run)}/goals/${intervalIndex}`,
+    withScope(`/api/runs/${encodeURIComponent(state.run)}/goals/${intervalIndex}`),
   );
 
   detailHeader.textContent = `goal_${intervalIndex}.json · ${data.goals.length} goals`;
@@ -238,7 +278,9 @@ async function loadCombinedFile(openIndex = null) {
   state.selection =
     openIndex === null ? "combined/file" : `combined/${openIndex}`;
   markActiveSelection();
-  const data = await fetchJson(`/api/runs/${encodeURIComponent(state.run)}/combined`);
+  const data = await fetchJson(
+    withScope(`/api/runs/${encodeURIComponent(state.run)}/combined`),
+  );
 
   detailHeader.textContent = `${state.manifest.combined_path || "combined.json"} · ${data.items.length} combined goals`;
   detailContent.innerHTML = "";
@@ -322,7 +364,7 @@ async function loadBangerDetail(combinedIndex) {
   markActiveSelection();
   detailHeader.textContent = "Banger opportunities";
   const data = await fetchJson(
-    `/api/runs/${encodeURIComponent(state.run)}/bangers/${combinedIndex}`,
+    withScope(`/api/runs/${encodeURIComponent(state.run)}/bangers/${combinedIndex}`),
   );
   const manifestItem = state.manifest.combined.find(
     (entry) => entry.combined_index === Number(combinedIndex),
@@ -414,7 +456,9 @@ async function loadQuestionDetail(questionId) {
   markActiveSelection();
   detailHeader.textContent = "Question set details";
   const data = await fetchJson(
-    `/api/runs/${encodeURIComponent(state.run)}/questions/${encodeURIComponent(questionId)}`,
+    withScope(
+      `/api/runs/${encodeURIComponent(state.run)}/questions/${encodeURIComponent(questionId)}`,
+    ),
   );
   const questions = data.questions || {};
   const threads = questions.threads || [];
@@ -513,7 +557,9 @@ async function loadGenericQaDetail(qaType, interval) {
   detailContent.innerHTML = "";
 
   const data = await fetchJson(
-    `/api/runs/${encodeURIComponent(state.run)}/generic-qa/${encodeURIComponent(qaType)}/${encodeURIComponent(interval)}`,
+    withScope(
+      `/api/runs/${encodeURIComponent(state.run)}/generic-qa/${encodeURIComponent(qaType)}/${encodeURIComponent(interval)}`,
+    ),
   );
   const item = data.item || {};
   const pairs = extractQaPairs(item);
@@ -608,7 +654,9 @@ async function loadPreBangerQaDetail(qaType, seedId) {
   detailContent.innerHTML = "";
 
   const data = await fetchJson(
-    `/api/runs/${encodeURIComponent(state.run)}/pre-banger-qa/${encodeURIComponent(qaType)}/${encodeURIComponent(seedId)}`,
+    withScope(
+      `/api/runs/${encodeURIComponent(state.run)}/pre-banger-qa/${encodeURIComponent(qaType)}/${encodeURIComponent(seedId)}`,
+    ),
   );
   const item = data.item || {};
   const pairs = extractQaPairs(item);

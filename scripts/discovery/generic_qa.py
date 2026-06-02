@@ -55,8 +55,8 @@ QA_TYPES = (
 
 SPARSE_QA_TYPES = frozenset({"verbatim_textbox"})
 
-MIN_QAS_PER_THREAD = 3
-MAX_QAS_PER_THREAD = 10
+MIN_QAS_PER_INTERVAL = 3
+MAX_QAS_PER_INTERVAL = 5
 
 
 @dataclass(frozen=True)
@@ -134,8 +134,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--pairs-per-run",
         type=int,
-        default=MAX_QAS_PER_THREAD,
-        help="Number of Q/A pairs requested in each single-thread file. Defaults to 10.",
+        default=MAX_QAS_PER_INTERVAL,
+        help="Number of Q/A pairs requested for each interval. Defaults to 10.",
     )
     parser.add_argument(
         "--interval-indexes",
@@ -234,8 +234,8 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--jobs must be greater than 0")
     if args.pairs_per_run <= 0:
         raise SystemExit("--pairs-per-run must be greater than 0")
-    if args.pairs_per_run > MAX_QAS_PER_THREAD:
-        raise SystemExit(f"--pairs-per-run must be at most {MAX_QAS_PER_THREAD}")
+    if args.pairs_per_run > MAX_QAS_PER_INTERVAL:
+        raise SystemExit(f"--pairs-per-run must be at most {MAX_QAS_PER_INTERVAL}")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
 
@@ -417,11 +417,11 @@ def validate_generic_qa_data(data: Any, path: Path | str) -> None:
     qa_pairs = extract_qa_pairs(data)
     if qa_pairs is None:
         raise RuntimeError(f"generic QA output must include qa_pairs: {path}")
-    min_qa_pairs = 0 if qa_type in SPARSE_QA_TYPES else MIN_QAS_PER_THREAD
-    if not (min_qa_pairs <= len(qa_pairs) <= MAX_QAS_PER_THREAD):
+    min_qa_pairs = 0 if qa_type in SPARSE_QA_TYPES else MIN_QAS_PER_INTERVAL
+    if not (min_qa_pairs <= len(qa_pairs) <= MAX_QAS_PER_INTERVAL):
         raise RuntimeError(
             f"generic QA output qa_pairs must contain "
-            f"{min_qa_pairs}-{MAX_QAS_PER_THREAD} entries, got "
+            f"{min_qa_pairs}-{MAX_QAS_PER_INTERVAL} entries, got "
             f"{len(qa_pairs)}: {path}"
         )
 
