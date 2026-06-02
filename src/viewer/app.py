@@ -14,6 +14,7 @@ from viewer.data import (
     list_discovery_runs,
     list_generic_qa_items,
     list_goal_intervals,
+    list_pre_banger_qa_items,
     list_questions,
     load_all_goals,
     load_banger,
@@ -21,6 +22,7 @@ from viewer.data import (
     load_generic_qa,
     load_goal,
     load_logs_window,
+    load_pre_banger_qa,
     load_question,
     resolve_run_path,
 )
@@ -55,6 +57,7 @@ def create_app(default_discovery_dir: Path | None = None) -> FastAPI:
                         "bangers": run.has_bangers,
                         "questions": run.has_questions,
                         "generic_qa": run.has_generic_qa,
+                        "pre_banger_qa": run.has_pre_banger_qa,
                     },
                 }
                 for run in runs
@@ -151,6 +154,22 @@ def create_app(default_discovery_dir: Path | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {"qa_type": qa_type, "interval_index": interval, "item": item}
+
+    @app.get("/api/runs/{run_name}/pre-banger-qa")
+    def get_pre_banger_qa_items(run_name: str) -> dict:
+        run_path = _run_path_or_404(run_name)
+        return {"items": list_pre_banger_qa_items(run_path)}
+
+    @app.get("/api/runs/{run_name}/pre-banger-qa/{qa_type}/{seed_id}")
+    def get_pre_banger_qa_detail(run_name: str, qa_type: str, seed_id: str) -> dict:
+        run_path = _run_path_or_404(run_name)
+        try:
+            item = load_pre_banger_qa(run_path, qa_type, seed_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"qa_type": qa_type, "seed_id": seed_id, "item": item}
 
     @app.get("/api/logs-window")
     def get_logs_window(ts: float, before: int = 200, after: int = 200) -> dict:

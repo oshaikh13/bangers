@@ -20,6 +20,10 @@ QUESTION_PATTERN = re.compile(r"^question_(.+)\.json$")
 GENERIC_QA_DIR = "10_generic_qa"
 GENERIC_QA_FILE_PATTERN = re.compile(r"^qa_(\d+)\.json$")
 GENERIC_QA_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+PRE_BANGER_QA_DIR = "20_pre_banger_qa"
+PRE_BANGER_QA_FILE_PATTERN = re.compile(r"^qa_(.+)\.json$")
+PRE_BANGER_QA_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+PRE_BANGER_SEED_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 LOGS_INDEXED_DIR = REPO_ROOT / "logs-indexed"
 COMBINED_RELATIVE_PATHS = (
     "02a_combined/combined.json",
@@ -47,6 +51,7 @@ class RunInfo:
     has_bangers: bool
     has_questions: bool
     has_generic_qa: bool
+    has_pre_banger_qa: bool
 
 
 def list_discovery_runs(repo_root: Path = REPO_ROOT) -> list[RunInfo]:
@@ -89,6 +94,7 @@ def describe_run(path: Path) -> RunInfo:
     bangers_dir = path / "03_bangers"
     questions_dir = path / "04_questions"
     generic_qa_dir = path / GENERIC_QA_DIR
+    pre_banger_qa_dir = path / PRE_BANGER_QA_DIR
     final_questions = questions_dir / "final_questions.json"
     goal_count = 0
     if goals_dir.is_dir():
@@ -98,6 +104,9 @@ def describe_run(path: Path) -> RunInfo:
             goal_count = len(list_goal_intervals(path))
     has_generic_qa = generic_qa_dir.is_dir() and any(
         generic_qa_dir.glob("*/qa_*.json")
+    )
+    has_pre_banger_qa = pre_banger_qa_dir.is_dir() and any(
+        pre_banger_qa_dir.glob("*/qa_*.json")
     )
     return RunInfo(
         name=path.name,
@@ -111,6 +120,7 @@ def describe_run(path: Path) -> RunInfo:
             questions_dir.glob("question_*.json")
         ),
         has_generic_qa=has_generic_qa,
+        has_pre_banger_qa=has_pre_banger_qa,
     )
 
 
@@ -298,6 +308,9 @@ def build_manifest(run_path: Path) -> dict[str, Any]:
     questions = list_questions(run_path) if run.has_questions else []
     goals = list_goal_intervals(run_path) if run.has_goals else []
     generic_qa = list_generic_qa_items(run_path) if run.has_generic_qa else []
+    pre_banger_qa = (
+        list_pre_banger_qa_items(run_path) if run.has_pre_banger_qa else []
+    )
 
     combined_items = [
         {
@@ -329,6 +342,7 @@ def build_manifest(run_path: Path) -> dict[str, Any]:
             "bangers": run.has_bangers,
             "questions": run.has_questions,
             "generic_qa": run.has_generic_qa,
+            "pre_banger_qa": run.has_pre_banger_qa,
         },
         "counts": {
             "goals": len(goals),
@@ -336,12 +350,14 @@ def build_manifest(run_path: Path) -> dict[str, Any]:
             "bangers": len(bangers),
             "questions": len(questions),
             "generic_qa": len(generic_qa),
+            "pre_banger_qa": len(pre_banger_qa),
         },
         "goals": goals,
         "combined": combined_items,
         "bangers": bangers,
         "questions": questions,
         "generic_qa": generic_qa,
+        "pre_banger_qa": pre_banger_qa,
     }
 
 
@@ -451,6 +467,87 @@ def load_generic_qa(run_path: Path, qa_type: str, interval: int) -> dict[str, An
     data = load_json(path)
     if not isinstance(data, dict):
         raise ValueError(f"expected object in {path.name}")
+    return data
+
+
+def _parse_timestamp(value: Any) -> float | None:
+    from discovery.question_context import parse_timestamp
+
+    return parse_timestamp(value)
+
+
+def list_pre_banger_qa_items(run_path: Path) -> list[dict[str, Any]]:
+    base = run_path / PRE_BANGER_QA_DIR
+    if not base.is_dir():
+        return []
+    items: list[dict[str, Any]] = []
+    for qa_type_dir in sorted(base.iterdir()):
+        if not qa_type_dir.is_dir() or not PRE_BANGER_QA_TYPE_PATTERN.match(
+            qa_type_dir.name
+        ):
+            continue
+        qa_type = qa_type_dir.name
+        for path in sorted(qa_type_dir.glob("qa_*.json")):
+            match = PRE_BANGER_QA_FILE_PATTERN.match(path.name)
+            if not match:
+                continue
+            seed_id = match.group(1)
+            try:
+                data = load_json(path)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            banger_timestamp = data.get("banger_timestamp")
+            banger_timestamp_ts = _parse_timestamp(banger_timestamp)
+            pairs = _generic_qa_pairs(data)
+            pair_count = len(pairs)
+            sample_question: str | None = None
+            for pair in pairs:
+                if isinstance(pair, dict):
+                    text = pair.get("question")
+                    if isinstance(text, str) and text:
+                        sample_question = text
+                        break
+            items.append(
+                {
+                    "qa_type": qa_type,
+                    "seed_id": seed_id,
+                    "banger_timestamp": banger_timestamp,
+                    "banger_timestamp_ts": banger_timestamp_ts,
+                    "pair_count": pair_count,
+                    "sample_question": sample_question,
+                }
+            )
+    items.sort(
+        key=lambda item: (
+            item["banger_timestamp_ts"]
+            if item["banger_timestamp_ts"] is not None
+            else float("inf"),
+            item["qa_type"],
+            item["seed_id"],
+        )
+    )
+    return items
+
+
+def load_pre_banger_qa(run_path: Path, qa_type: str, seed_id: str) -> dict[str, Any]:
+    if not PRE_BANGER_QA_TYPE_PATTERN.match(qa_type or ""):
+        raise FileNotFoundError(f"invalid qa_type: {qa_type!r}")
+    if not PRE_BANGER_SEED_ID_PATTERN.match(seed_id or ""):
+        raise FileNotFoundError(f"invalid seed_id: {seed_id!r}")
+    path = run_path / PRE_BANGER_QA_DIR / qa_type / f"qa_{seed_id}.json"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"pre-banger qa file not found: {qa_type}/qa_{seed_id}.json"
+        )
+    data = load_json(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"expected object in {path.name}")
+    if data.get("banger_timestamp_ts") is None:
+        ts = _parse_timestamp(data.get("banger_timestamp"))
+        if ts is not None:
+            data = {**data, "banger_timestamp_ts": ts}
     return data
 
 

@@ -130,6 +130,8 @@ async function refreshCurrentTab() {
     await renderQuestionsTab();
   } else if (state.tab === "generic-qa") {
     await renderGenericQaTab();
+  } else if (state.tab === "pre-banger-qa") {
+    await renderPreBangerQaTab();
   }
 }
 
@@ -552,11 +554,114 @@ async function loadGenericQaDetail(qaType, interval) {
     );
   });
 
+  await appendLogsWindowCard(centerTs, "Logs around qa_timestamp");
+}
+
+async function renderPreBangerQaTab() {
+  const manifest = state.manifest;
+  const items = manifest.pre_banger_qa || [];
+  listHeader.textContent =
+    items.length === 1
+      ? "1 pre-banger QA file"
+      : `${items.length} pre-banger QA files`;
+  detailHeader.textContent = "Select a pre-banger QA item";
+  itemList.innerHTML = "";
+
+  if (!manifest.stages.pre_banger_qa || items.length === 0) {
+    detailContent.innerHTML = `<p class="empty-state">No pre-banger QA files found for this run. Generate with <code>uv run scripts/runners/run_pre_banger_qa.py</code>.</p>`;
+    return;
+  }
+
+  for (const item of items) {
+    const tsLabel = shortIsoLabel(item.banger_timestamp);
+    const meta = `${item.qa_type} · seed ${item.seed_id} · ${item.pair_count} pairs${tsLabel ? ` · ${tsLabel}` : ""}`;
+    const selectionKey = `pre-banger-qa/${item.qa_type}/${item.seed_id}`;
+    itemList.appendChild(
+      createListButton(
+        item.sample_question || `${item.qa_type} ${item.seed_id}`,
+        meta,
+        selectionKey,
+        state.selection === selectionKey,
+      ),
+    );
+  }
+
+  let selected = state.selection;
+  if (!selected?.startsWith("pre-banger-qa/")) {
+    const first = items[0];
+    selected = `pre-banger-qa/${first.qa_type}/${first.seed_id}`;
+  }
+  const rest = selected.slice("pre-banger-qa/".length);
+  const slash = rest.indexOf("/");
+  if (slash === -1) {
+    return;
+  }
+  const qaType = rest.slice(0, slash);
+  const seedId = rest.slice(slash + 1);
+  await loadPreBangerQaDetail(qaType, seedId);
+}
+
+async function loadPreBangerQaDetail(qaType, seedId) {
+  state.selection = `pre-banger-qa/${qaType}/${seedId}`;
+  markActiveSelection();
+  detailHeader.textContent = `${qaType} · seed ${seedId}`;
+  detailContent.innerHTML = "";
+
+  const data = await fetchJson(
+    `/api/runs/${encodeURIComponent(state.run)}/pre-banger-qa/${encodeURIComponent(qaType)}/${encodeURIComponent(seedId)}`,
+  );
+  const item = data.item || {};
+  const pairs = extractQaPairs(item);
+  const centerTs =
+    typeof item.banger_timestamp_ts === "number" ? item.banger_timestamp_ts : null;
+  const target = item.target_banger || {};
+
+  detailContent.appendChild(
+    createCollapsibleCard(
+      `${qaType} · seed ${seedId}`,
+      `
+        <div class="badge-row">
+          <span class="badge">${pairs.length} Q/A pairs</span>
+          <span class="badge">banger_timestamp ${escapeHtml(item.banger_timestamp || "?")}</span>
+        </div>
+        ${field("Target suggestion", target.suggestion)}
+        ${field("Target action", target.action)}
+        ${field("Expected artifact", target.expected_artifact)}
+      `,
+      true,
+    ),
+  );
+
+  pairs.forEach((pair, index) => {
+    detailContent.appendChild(
+      createCollapsibleCard(
+        `Q${pair.q_id ?? index}. ${pair.question || `Q/A ${index + 1}`}`,
+        `
+          <div class="badge-row">
+            <span class="badge">${escapeHtml(pair.category || qaType)}</span>
+            <span class="badge">${escapeHtml(pair.answer_basis || "?")}</span>
+            <span class="badge">${escapeHtml(pair.timescale || "?")}</span>
+            <span class="badge">Difficulty ${pair.question_difficulty ?? "?"}</span>
+          </div>
+          ${field("Answer", pair.answer)}
+          ${field("Verify at", pair.verify_at_iso)}
+          ${field("Why it matters", pair.why_it_matters)}
+          ${field("Evidence grounding", pair.evidence_grounding)}
+        `,
+        true,
+      ),
+    );
+  });
+
+  await appendLogsWindowCard(centerTs, "Logs around banger_timestamp");
+}
+
+async function appendLogsWindowCard(centerTs, heading) {
   const logsCard = document.createElement("section");
   logsCard.className = "logs-window-card";
   logsCard.innerHTML = `
     <div class="logs-window-header">
-      <h3>Logs around qa_timestamp</h3>
+      <h3>${escapeHtml(heading)}</h3>
       <div class="logs-window-controls">
         <label>Past <input type="number" min="0" step="50" value="200" data-role="logs-before" /></label>
         <label>Future <input type="number" min="0" step="50" value="200" data-role="logs-after" /></label>
@@ -576,7 +681,7 @@ async function loadGenericQaDetail(qaType, interval) {
 
   async function reload() {
     if (centerTs === null) {
-      body.innerHTML = `<p class="empty-state">qa_timestamp_ts missing from this file.</p>`;
+      body.innerHTML = `<p class="empty-state">timestamp missing from this file.</p>`;
       return;
     }
     const before = Math.max(0, Number(beforeInput.value) || 0);
@@ -702,7 +807,9 @@ function parseHash() {
   }
   const slash = hash.indexOf("/");
   if (slash === -1) {
-    if (["goals", "combined", "bangers", "questions", "generic-qa"].includes(hash)) {
+    if (
+      ["goals", "combined", "bangers", "questions", "generic-qa", "pre-banger-qa"].includes(hash)
+    ) {
       state.tab = hash;
       state.selection = null;
     }
@@ -710,7 +817,9 @@ function parseHash() {
   }
   const tab = hash.slice(0, slash);
   const id = hash.slice(slash + 1);
-  if (["goals", "combined", "bangers", "questions", "generic-qa"].includes(tab)) {
+  if (
+    ["goals", "combined", "bangers", "questions", "generic-qa", "pre-banger-qa"].includes(tab)
+  ) {
     state.tab = tab;
     state.selection = `${tab}/${id}`;
   }
