@@ -52,10 +52,10 @@ class PreBangerQATests(unittest.TestCase):
         self.assertEqual(args.seed_filter_path.name, "seed_rankings.json")
         self.assertEqual(args.combined_bangers_path.name, "combined_bangers.json")
 
-    def test_day_runs_reuse_global_seed_ranking_path(self) -> None:
-        args = parse_args(["--days", "0-2"])
+    def test_day_runs_use_day_scoped_seed_ranking_path(self) -> None:
+        args = parse_args(["--day", "0-2"])
 
-        self.assertEqual(args.seed_filter_path.name, "seed_rankings.json")
+        self.assertEqual(args.seed_filter_path.name, "seed_rankings_days_0-2.json")
         self.assertEqual(args.combined_bangers_path.name, "combined_bangers.json")
         self.assertEqual(
             final_pre_banger_qa_path(args).name,

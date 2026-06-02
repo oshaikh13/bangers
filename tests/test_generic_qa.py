@@ -13,7 +13,9 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from discovery.generic_qa import (
     context_for_interval,
+    final_generic_qa_path,
     load_generic_qa_template,
+    parse_args,
     parse_qa_types,
     validate_generic_qa_data,
     write_final_generic_qa,
@@ -53,6 +55,14 @@ class GenericQATests(unittest.TestCase):
         self.assertEqual(
             [row["interval_index"] for row in select_rows(rows, "1-3", "1", 0, None)],
             [2],
+        )
+
+    def test_day_alias_uses_day_scoped_final_path(self) -> None:
+        args = parse_args(["--day", "0-2"])
+
+        self.assertEqual(
+            final_generic_qa_path(args).name,
+            "final_qa_days_0-2.json",
         )
 
     def test_parse_qa_types_expands_all_and_dedupes_specific_types(self) -> None:

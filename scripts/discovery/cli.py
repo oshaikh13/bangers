@@ -101,6 +101,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--days",
+        "--day",
+        dest="days",
         help=(
             "Comma-separated zero-based day numbers or ranges to run, e.g. "
             "`0` or `0-4`. Days are derived from interval row start dates."

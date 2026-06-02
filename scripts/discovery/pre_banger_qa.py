@@ -196,6 +196,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--days",
+        "--day",
+        dest="days",
         help=(
             "Comma-separated zero-based day numbers or ranges to include, e.g. "
             "`0` or `0-4`. Days are derived from interval row start dates."
@@ -308,6 +310,12 @@ def default_seed_filter_path(pre_banger_qa_dir: Path) -> Path:
     return pre_banger_qa_dir / "seed_rankings.json"
 
 
+def scoped_seed_filter_path(args: argparse.Namespace) -> Path:
+    if args.days:
+        return args.pre_banger_qa_dir / f"seed_rankings_days_{interval_indexes_slug(args.days)}.json"
+    return default_seed_filter_path(args.pre_banger_qa_dir)
+
+
 def daily_seed_filter_dir(args: argparse.Namespace) -> Path:
     path = seed_filter_path(args)
     return path.with_name(f"{path.stem}_daily")
@@ -364,7 +372,7 @@ def normalize_args(args: argparse.Namespace) -> None:
     args.seed_filter_path = (
         Path(args.seed_filter_path)
         if args.seed_filter_path
-        else default_seed_filter_path(args.pre_banger_qa_dir)
+        else scoped_seed_filter_path(args)
     ).resolve()
     args.prompts_dir = Path(args.prompts_dir).resolve()
     args.qa_types = parse_qa_types(args.qa_types)
@@ -412,15 +420,20 @@ def agent_qa_path(agent_workdir: Path, qa_type: str, seed_id: str) -> Path:
 
 
 def load_interval_filter_rows(args: argparse.Namespace) -> list[dict[str, Any]] | None:
-    selected_indexes = parse_interval_indexes(args.interval_indexes)
-    if not args.intervals.exists() and (selected_indexes is not None or args.days):
+    interval_indexes = getattr(args, "interval_indexes", None)
+    days = getattr(args, "days", None)
+    intervals = getattr(args, "intervals", None)
+    selected_indexes = parse_interval_indexes(interval_indexes)
+    if intervals is None:
+        return None
+    if not intervals.exists() and (selected_indexes is not None or days):
         raise SystemExit(f"interval JSONL not found: {args.intervals}")
 
     day_indexes: set[int] | None = None
     interval_rows: list[dict[str, Any]] | None = None
-    if args.days:
-        interval_rows = read_jsonl(args.intervals)
-        day_indexes = interval_indexes_for_days(interval_rows, args.days)
+    if days:
+        interval_rows = read_jsonl(intervals)
+        day_indexes = interval_indexes_for_days(interval_rows, days)
 
     if selected_indexes is not None and day_indexes is not None:
         selected_indexes &= day_indexes
@@ -429,11 +442,11 @@ def load_interval_filter_rows(args: argparse.Namespace) -> list[dict[str, Any]] 
 
     if selected_indexes is None:
         return None
-    if not args.intervals.exists():
+    if not intervals.exists():
         raise SystemExit(f"interval JSONL not found: {args.intervals}")
 
     if interval_rows is None:
-        interval_rows = read_jsonl(args.intervals)
+        interval_rows = read_jsonl(intervals)
     rows = [
         row
         for row in interval_rows
@@ -1273,12 +1286,15 @@ def final_pre_banger_qa_path(args: argparse.Namespace) -> Path:
 
 def write_final_pre_banger_qa(args: argparse.Namespace) -> None:
     final_items: list[dict[str, Any]] = []
+    interval_rows = load_interval_filter_rows(args)
     for qa_type, seed_id, path in iter_pre_banger_qa_files(args.pre_banger_qa_dir):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"pre-banger QA output is not valid JSON: {path}: {exc}") from exc
         validate_pre_banger_qa_data(data, path)
+        if interval_rows is not None and not seed_in_interval_rows(data, interval_rows):
+            continue
         final_items.append(
             {
                 "qa_type": qa_type,
@@ -1322,7 +1338,20 @@ def run(args: argparse.Namespace) -> int:
     if not all_seeds:
         raise SystemExit(f"no banger seeds found in {args.bangers_dir}")
     interval_rows = load_interval_filter_rows(args)
-    daily_batches = write_daily_combined_bangers_files(args, combined_bangers)
+    ranking_seeds = (
+        filter_seeds_by_interval_rows(all_seeds, interval_rows)
+        if args.days and interval_rows is not None
+        else all_seeds
+    )
+    if not ranking_seeds:
+        print("no pre-banger seeds selected for ranking", file=sys.stderr)
+        return 0
+    ranking_combined_bangers = {
+        **combined_bangers,
+        "seed_count": len(ranking_seeds),
+        "seeds": ranking_seeds,
+    }
+    daily_batches = write_daily_combined_bangers_files(args, ranking_combined_bangers)
 
     seed_filter_template = load_seed_filter_template(args)
     if args.dry_run and (args.force_seed_filter or not seed_filter_path(args).exists()):
@@ -1344,6 +1373,8 @@ def run(args: argparse.Namespace) -> int:
             ensure_daily_seed_filter_file(seed_filter_path(args))
             if not args.dry_run:
                 enrich_seed_filter_file(seed_filter_path(args), all_seeds)
+            data = json.loads(seed_filter_path(args).read_text(encoding="utf-8"))
+            require_all_ranked_seeds(data, ranking_seeds, seed_filter_path(args))
             ranked = load_seed_filter(seed_filter_path(args), all_seeds)
         except RuntimeError as exc:
             if args.dry_run:
@@ -1405,7 +1436,7 @@ def run(args: argparse.Namespace) -> int:
                 completed_daily.append((day, day_seeds, output_path))
 
         completed_daily.sort(key=lambda item: (item[0] == "undated", item[0]))
-        merge_daily_seed_filters(completed_daily, all_seeds, seed_filter_path(args))
+        merge_daily_seed_filters(completed_daily, ranking_seeds, seed_filter_path(args))
         ranked = load_seed_filter(seed_filter_path(args), all_seeds)
 
     if ranked is None:
