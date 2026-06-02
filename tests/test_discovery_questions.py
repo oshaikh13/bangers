@@ -118,13 +118,13 @@ class QuestionContextTests(unittest.TestCase):
             self.assertEqual(final_data[0]["context_events"][0]["text"], "event")
             self.assertEqual(final_data[0]["questions"]["context_events"][0]["text"], "event")
 
-    def test_question_sampling_defaults_to_twenty_percent_deterministically(self) -> None:
+    def test_question_sampling_defaults_to_ten_percent_deterministically(self) -> None:
         suggestions = [{"_question_id": str(index)} for index in range(20)]
 
-        selected = sample_question_suggestions(suggestions, 0.20, "seed")
-        selected_again = sample_question_suggestions(suggestions, 0.20, "seed")
+        selected = sample_question_suggestions(suggestions, 0.10, "seed")
+        selected_again = sample_question_suggestions(suggestions, 0.10, "seed")
 
-        self.assertEqual(len(selected), 4)
+        self.assertEqual(len(selected), 2)
         self.assertEqual(selected, selected_again)
         self.assertNotEqual(selected, suggestions[:2])
 

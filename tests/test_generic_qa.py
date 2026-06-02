@@ -71,8 +71,8 @@ class GenericQATests(unittest.TestCase):
             ["recall", "verbatim_textbox"],
         )
 
-    def test_default_pairs_per_run_is_three(self) -> None:
-        self.assertEqual(parse_args([]).pairs_per_run, 3)
+    def test_default_pairs_per_run_is_two(self) -> None:
+        self.assertEqual(parse_args([]).pairs_per_run, 2)
 
     def test_context_for_interval_uses_latest_100_events_before_end_ts(self) -> None:
         events = [

@@ -55,9 +55,9 @@ QA_TYPES = (
 
 SPARSE_QA_TYPES = frozenset({"verbatim_textbox"})
 
-MIN_QAS_PER_INTERVAL = 3
+MIN_QAS_PER_INTERVAL = 2
 MAX_QAS_PER_INTERVAL = 5
-DEFAULT_QAS_PER_INTERVAL = 3
+DEFAULT_QAS_PER_INTERVAL = 2
 
 
 @dataclass(frozen=True)
@@ -136,7 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--pairs-per-run",
         type=int,
         default=DEFAULT_QAS_PER_INTERVAL,
-        help="Number of Q/A pairs requested for each interval. Defaults to 3.",
+        help="Number of Q/A pairs requested for each interval. Defaults to 2.",
     )
     parser.add_argument(
         "--interval-indexes",

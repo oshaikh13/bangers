@@ -56,10 +56,14 @@ QA_TYPES = (
 THREADED_QA_TYPE = "threaded"
 MIN_QAS_PER_RUN = 3
 MAX_QAS_PER_RUN = 10
+DEFAULT_QAS_PER_RUN = 3
 THREAD_COUNT = 3
 MIN_QAS_PER_THREAD = 3
 MAX_QAS_PER_THREAD = 10
-DEFAULT_SEED_SAMPLE_FRACTION = 0.20
+MIN_THREADED_QAS_PER_RUN = THREAD_COUNT * MIN_QAS_PER_THREAD
+MAX_THREADED_QAS_PER_RUN = 10
+DEFAULT_THREADED_QAS_PER_RUN = 10
+DEFAULT_SEED_SAMPLE_FRACTION = 0.10
 DEFAULT_SEED_SAMPLE_SEED = "0"
 
 
@@ -178,8 +182,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--pairs-per-run",
         type=int,
-        default=6,
-        help="Number of Q/A pairs requested for single-turn QA types. Defaults to 6.",
+        default=DEFAULT_QAS_PER_RUN,
+        help="Number of Q/A pairs requested for single-turn QA types. Defaults to 3.",
+    )
+    parser.add_argument(
+        "--threaded-pairs-per-run",
+        type=int,
+        default=DEFAULT_THREADED_QAS_PER_RUN,
+        help=(
+            "Total Q/A pairs requested for the threaded QA type across all "
+            "threads. Defaults to 10."
+        ),
     )
     parser.add_argument(
         "--seed-ids",
@@ -219,7 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SEED_SAMPLE_FRACTION,
         help=(
             "Sample this fraction of selected ranked seeds, stratified across "
-            "the ranking, before applying --limit. Defaults to 0.20; use 1.0 "
+            "the ranking, before applying --limit. Defaults to 0.10; use 1.0 "
             "to generate pre-banger QA for every selected seed."
         ),
     )
@@ -353,6 +366,14 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit(f"--pairs-per-run must be at least {MIN_QAS_PER_RUN}")
     if args.pairs_per_run > MAX_QAS_PER_RUN:
         raise SystemExit(f"--pairs-per-run must be at most {MAX_QAS_PER_RUN}")
+    if args.threaded_pairs_per_run < MIN_THREADED_QAS_PER_RUN:
+        raise SystemExit(
+            f"--threaded-pairs-per-run must be at least {MIN_THREADED_QAS_PER_RUN}"
+        )
+    if args.threaded_pairs_per_run > MAX_THREADED_QAS_PER_RUN:
+        raise SystemExit(
+            f"--threaded-pairs-per-run must be at most {MAX_THREADED_QAS_PER_RUN}"
+        )
     if args.seed_sample_fraction <= 0 or args.seed_sample_fraction > 1:
         raise SystemExit("--seed-sample-fraction must be greater than 0 and at most 1")
     if args.startup_progress_every < 0:
@@ -1044,6 +1065,12 @@ def context_for_seed(
     )
 
 
+def qa_pairs_per_run_for_type(args: argparse.Namespace, qa_type: str) -> int:
+    if qa_type == THREADED_QA_TYPE:
+        return args.threaded_pairs_per_run
+    return args.pairs_per_run
+
+
 def attach_pre_banger_context(
     data: dict[str, Any],
     qa_type: str,
@@ -1119,6 +1146,7 @@ def validate_pre_banger_qa_data(data: Any, path: Path | str) -> None:
                 f"pre-banger threaded output must contain exactly {THREAD_COUNT} "
                 f"threads: {path}"
             )
+        total_qa_pairs = 0
         for thread_index, thread in enumerate(threads):
             if not isinstance(thread, dict):
                 raise RuntimeError(
@@ -1139,6 +1167,7 @@ def validate_pre_banger_qa_data(data: Any, path: Path | str) -> None:
                     f"must contain {MIN_QAS_PER_THREAD}-{MAX_QAS_PER_THREAD} "
                     f"entries: {path}"
                 )
+            total_qa_pairs += len(qa_pairs)
             for pair_index, pair in enumerate(qa_pairs):
                 validate_grounded_pair(
                     pair,
@@ -1150,6 +1179,16 @@ def validate_pre_banger_qa_data(data: Any, path: Path | str) -> None:
                     "pre-banger QA",
                     "banger_timestamp",
                 )
+        if not (
+            MIN_THREADED_QAS_PER_RUN
+            <= total_qa_pairs
+            <= MAX_THREADED_QAS_PER_RUN
+        ):
+            raise RuntimeError(
+                f"pre-banger threaded output must contain "
+                f"{MIN_THREADED_QAS_PER_RUN}-{MAX_THREADED_QAS_PER_RUN} total "
+                f"Q/A pairs, got {total_qa_pairs}: {path}"
+            )
         return
 
     qa_pairs = data.get("qa_pairs")
@@ -1205,7 +1244,7 @@ def print_pre_banger_qa_dry_run(
         context_events,
         agent_output_path,
         provider.name,
-        args.pairs_per_run,
+        qa_pairs_per_run_for_type(args, qa_type),
     )
     print(f"\n--- pre-banger QA {qa_type} seed {seed_id} ---")
     print(f"pre-banger QA path: {output_path}")
@@ -1255,7 +1294,7 @@ def run_pre_banger_qa_once(
         context_events,
         agent_output_path,
         args.provider,
-        args.pairs_per_run,
+        qa_pairs_per_run_for_type(args, qa_type),
     )
     job = run_agent_job(
         args,

@@ -14,11 +14,11 @@ scripts/runners/start_discovery.sh \
 Use `--provider claude` to run with Claude. `--jobs` controls parallel model
 calls for stages that support concurrency.
 
-Stage 04 question generation samples 20% of selected banger opportunities by
+Stage 04 question generation samples 10% of selected banger opportunities by
 default to control model usage. Pass `--questions-sample-fraction 1.0` to
 generate questions for every selected banger opportunity, or
 `--questions-sample-seed <seed>` to pick a different deterministic subset.
-Pre-banger QA similarly samples 20% of selected ranked seeds by default,
+Pre-banger QA similarly samples 10% of selected ranked seeds by default,
 stratified across the ranking; use `--seed-sample-fraction 1.0` or
 `--seed-sample-seed <seed>` to override it.
 

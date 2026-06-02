@@ -165,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_QUESTIONS_SAMPLE_FRACTION,
         help=(
             "With --questions, randomly sample this fraction of selected banger "
-            "opportunities before applying --limit. Defaults to 0.20; use 1.0 "
+            "opportunities before applying --limit. Defaults to 0.10; use 1.0 "
             "to generate questions for every selected opportunity."
         ),
     )

@@ -47,6 +47,12 @@ class PreBangerQATests(unittest.TestCase):
             ["curiosity", "threaded"],
         )
 
+    def test_default_pair_budgets_are_reduced(self) -> None:
+        args = parse_args([])
+
+        self.assertEqual(args.pairs_per_run, 3)
+        self.assertEqual(args.threaded_pairs_per_run, 10)
+
     def test_interval_runs_use_interval_scoped_paths(self) -> None:
         args = parse_args(["--interval-indexes", "40-49"])
 
@@ -311,26 +317,26 @@ class PreBangerQATests(unittest.TestCase):
 
         self.assertEqual([seed["seed_id"] for seed in selected], ["second"])
 
-    def test_pre_banger_seed_sampling_defaults_to_twenty_percent_deterministically(self) -> None:
+    def test_pre_banger_seed_sampling_defaults_to_ten_percent_deterministically(self) -> None:
         seeds = [{"seed_id": str(index)} for index in range(20)]
 
-        selected = sample_pre_banger_seeds(seeds, 0.20, "seed")
-        selected_again = sample_pre_banger_seeds(seeds, 0.20, "seed")
+        selected = sample_pre_banger_seeds(seeds, 0.10, "seed")
+        selected_again = sample_pre_banger_seeds(seeds, 0.10, "seed")
 
-        self.assertEqual(len(selected), 4)
+        self.assertEqual(len(selected), 2)
         self.assertEqual(selected, selected_again)
         self.assertNotEqual(selected, seeds[:2])
 
     def test_pre_banger_seed_sampling_is_stratified_by_rank(self) -> None:
         seeds = [{"seed_id": str(index)} for index in range(100)]
 
-        selected = sample_pre_banger_seeds(seeds, 0.20, "seed")
+        selected = sample_pre_banger_seeds(seeds, 0.10, "seed")
         selected_indexes = [int(item["seed_id"]) for item in selected]
 
-        self.assertEqual(len(selected_indexes), 20)
+        self.assertEqual(len(selected_indexes), 10)
         for bucket_index, selected_index in enumerate(selected_indexes):
-            self.assertGreaterEqual(selected_index, bucket_index * 5)
-            self.assertLess(selected_index, (bucket_index + 1) * 5)
+            self.assertGreaterEqual(selected_index, bucket_index * 10)
+            self.assertLess(selected_index, (bucket_index + 1) * 10)
 
     def test_pre_banger_seed_sampling_can_select_all(self) -> None:
         seeds = [{"seed_id": str(index)} for index in range(20)]
@@ -434,6 +440,16 @@ class PreBangerQATests(unittest.TestCase):
     def test_validate_pre_banger_accepts_threaded_payload(self) -> None:
         validate_pre_banger_qa_data(_valid_threaded_payload(), "qa.json")
 
+    def test_validate_pre_banger_rejects_threaded_payload_over_total_cap(self) -> None:
+        data = _valid_threaded_payload()
+        for thread in data["threads"]:
+            thread["qa_pairs"].append(
+                _pair(3, "What extra signal should the assistant read?", "pre_banger_threaded")
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "9-10 total"):
+            validate_pre_banger_qa_data(data, "qa.json")
+
     def test_validate_pre_banger_rejects_missing_context_basis(self) -> None:
         data = _valid_flat_payload()
         data["qa_pairs"][0]["question_basis"]["context_event_indexes"] = [2]
@@ -519,6 +535,7 @@ class PreBangerQATests(unittest.TestCase):
         self.assertIn("Thread 0, receptivity", prompt_text)
         self.assertIn("Thread 1, curiosity", prompt_text)
         self.assertIn("Thread 2, self-done", prompt_text)
+        self.assertIn("total Q/A pairs across the 3 threads", prompt_text)
 
 
 def _context_event() -> dict:

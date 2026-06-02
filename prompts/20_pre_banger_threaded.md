@@ -18,10 +18,11 @@ Use these thread arcs:
 - Thread 2, self-done: likely next action -> whether the user would check or
   solve it alone -> assistant marginal value.
 
-Each thread should contain 3-`{pairs_per_run}` Q/A pairs. Later questions in a
-thread should build on the earlier answers by narrowing the same user-state
-question. Answers stay concise and should describe the user's preferences,
-beliefs, tolerance, or likely behavior, not the hidden artifact's details.
+Generate exactly `{pairs_per_run}` total Q/A pairs across the 3 threads. Each
+thread must contain at least 3 Q/A pairs. Later questions in a thread should
+build on the earlier answers by narrowing the same user-state question. Answers
+stay concise and should describe the user's preferences, beliefs, tolerance, or
+likely behavior, not the hidden artifact's details.
 
 Return JSON only:
 

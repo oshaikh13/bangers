@@ -50,7 +50,7 @@ from .question_context import (
 from .providers import build_provider_command
 
 SCREENSHOTS_DIR = "screenshots"
-DEFAULT_QUESTIONS_SAMPLE_FRACTION = 0.20
+DEFAULT_QUESTIONS_SAMPLE_FRACTION = 0.10
 DEFAULT_QUESTIONS_SAMPLE_SEED = "0"
 
 
