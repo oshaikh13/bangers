@@ -22,6 +22,8 @@ Use `--day` or `--days`. The selector is zero-based and inclusive:
 - `--day 1` runs the second day.
 - `--day 1-5` runs days 1, 2, 3, 4, and 5.
 
+Run `python scripts/print_day_intervals.py` to print each day selector, date, interval count, and interval index range.
+
 Run interval-stage shards in parallel:
 
 ```bash
