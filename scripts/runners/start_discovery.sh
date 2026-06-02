@@ -8,7 +8,7 @@ phase="all"
 day_selector=""
 banger_batch_size="5"
 skip_setup="false"
-effort=""
+effort="high"
 
 usage() {
   cat <<'EOF'
@@ -25,7 +25,7 @@ Options:
   --effort LEVEL                Reasoning effort for model stages. Maps to the
                                 provider flag: codex --codex-reasoning-effort
                                 (freeform, default high), claude --claude-effort
-                                (low|medium|high|xhigh|max). Default: runner default.
+                                (low|medium|high|xhigh|max). Default: high.
   --skip-setup                  Skip uv sync, indexing, and interval recording
   -h, --help                    Show this help
 
