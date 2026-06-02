@@ -14,7 +14,11 @@ from .paths import (
     default_discovery_dir,
     default_intervals_path,
 )
-from .runner import run
+from .runner import (
+    DEFAULT_QUESTIONS_SAMPLE_FRACTION,
+    DEFAULT_QUESTIONS_SAMPLE_SEED,
+    run,
+)
 from .scoping import scoped_stage_dir, scope_slug
 
 
@@ -155,6 +159,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
     parser.add_argument("--limit", type=int, help="Maximum number of rows to run.")
+    parser.add_argument(
+        "--questions-sample-fraction",
+        type=float,
+        default=DEFAULT_QUESTIONS_SAMPLE_FRACTION,
+        help=(
+            "With --questions, randomly sample this fraction of selected banger "
+            "opportunities before applying --limit. Defaults to 0.20; use 1.0 "
+            "to generate questions for every selected opportunity."
+        ),
+    )
+    parser.add_argument(
+        "--questions-sample-seed",
+        default=DEFAULT_QUESTIONS_SAMPLE_SEED,
+        help=(
+            "With --questions, seed used for deterministic random sampling. "
+            "Change this to pick a different subset."
+        ),
+    )
     parser.add_argument(
         "--force",
         action="store_true",
@@ -365,6 +387,8 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--jobs must be greater than 0")
     if args.banger_batch_size <= 0:
         raise SystemExit("--banger-batch-size must be greater than 0")
+    if args.questions_sample_fraction <= 0 or args.questions_sample_fraction > 1:
+        raise SystemExit("--questions-sample-fraction must be greater than 0 and at most 1")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
     if args.banger_input_indexes and not (args.questions or args.bangers):

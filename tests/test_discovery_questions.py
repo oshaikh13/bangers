@@ -17,7 +17,13 @@ from discovery.question_context import (
     load_indexed_events,
     training_rows_from_final_questions,
 )
-from discovery.runner import validate_questions_data, write_final_questions
+from discovery.cli import parse_args
+from discovery.runner import (
+    load_suggestions_from_bangers,
+    sample_question_suggestions,
+    validate_questions_data,
+    write_final_questions,
+)
 
 
 class QuestionContextTests(unittest.TestCase):
@@ -112,6 +118,67 @@ class QuestionContextTests(unittest.TestCase):
             self.assertEqual(final_data[0]["context_events"][0]["text"], "event")
             self.assertEqual(final_data[0]["questions"]["context_events"][0]["text"], "event")
 
+    def test_question_sampling_defaults_to_twenty_percent_deterministically(self) -> None:
+        suggestions = [{"_question_id": str(index)} for index in range(20)]
+
+        selected = sample_question_suggestions(suggestions, 0.20, "seed")
+        selected_again = sample_question_suggestions(suggestions, 0.20, "seed")
+
+        self.assertEqual(len(selected), 4)
+        self.assertEqual(selected, selected_again)
+        self.assertNotEqual(selected, suggestions[:2])
+
+    def test_question_sampling_can_select_all(self) -> None:
+        suggestions = [{"_question_id": str(index)} for index in range(20)]
+
+        self.assertEqual(
+            sample_question_suggestions(suggestions, 1.0, "seed"),
+            suggestions,
+        )
+
+    def test_load_suggestions_samples_before_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            bangers_dir = Path(tmp_dir) / "03_bangers"
+            bangers_dir.mkdir()
+            _write_bangers_batch(bangers_dir / "bangers_0_19.json", range(20))
+
+            args = parse_args(
+                [
+                    "--questions",
+                    "--bangers-dir",
+                    str(bangers_dir),
+                    "--questions-sample-fraction",
+                    "0.5",
+                    "--questions-sample-seed",
+                    "seed",
+                    "--limit",
+                    "3",
+                ]
+            )
+
+            selected = load_suggestions_from_bangers(args)
+            sampled_without_limit = load_suggestions_from_bangers(
+                parse_args(
+                    [
+                        "--questions",
+                        "--bangers-dir",
+                        str(bangers_dir),
+                        "--questions-sample-fraction",
+                        "0.5",
+                        "--questions-sample-seed",
+                        "seed",
+                    ]
+                )
+            )
+
+            self.assertEqual(len(selected), 3)
+            self.assertEqual(len(sampled_without_limit), 10)
+            self.assertEqual(selected, sampled_without_limit[:3])
+
+    def test_parse_rejects_invalid_question_sample_fraction(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "questions-sample-fraction"):
+            parse_args(["--questions", "--questions-sample-fraction", "0"])
+
     def test_training_export_omits_metadata(self) -> None:
         rows = training_rows_from_final_questions(
             [
@@ -177,6 +244,29 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
         "".join(json.dumps(row) + "\n" for row in rows),
         encoding="utf-8",
     )
+
+
+def _write_bangers_batch(path: Path, indexes: range) -> None:
+    data = {
+        "bangers": [
+            {
+                "input_index": index,
+                "goals": [
+                    {
+                        "goal": f"Goal {index}",
+                        "opportunities": [
+                            {
+                                "timestamp": float(index),
+                                "suggestion": f"Suggestion {index}",
+                            }
+                        ],
+                    }
+                ],
+            }
+            for index in indexes
+        ]
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
 
 
 if __name__ == "__main__":

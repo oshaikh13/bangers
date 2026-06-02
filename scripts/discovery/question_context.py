@@ -19,6 +19,10 @@ def parse_timestamp(value: Any) -> float | None:
         return None
 
     timestamp = value
+    if "Z-" in timestamp:
+        # Some banger seeds cover a short discovery window. Use the end of the
+        # window as the context cutoff, when the suggestion is fully grounded.
+        timestamp = timestamp.rsplit("Z-", 1)[1]
     if timestamp.endswith("Z"):
         timestamp = f"{timestamp[:-1]}+00:00"
     try:

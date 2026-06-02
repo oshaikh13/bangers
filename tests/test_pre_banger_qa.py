@@ -22,6 +22,7 @@ from discovery.pre_banger_qa import (
     parse_args,
     parse_qa_types,
     ranked_seed_metadata,
+    sample_pre_banger_seeds,
     seed_ranking_day,
     select_filtered_seeds,
     validate_seed_filter_data,
@@ -309,6 +310,69 @@ class PreBangerQATests(unittest.TestCase):
         selected = select_filtered_seeds(args, seeds, interval_rows)
 
         self.assertEqual([seed["seed_id"] for seed in selected], ["second"])
+
+    def test_pre_banger_seed_sampling_defaults_to_twenty_percent_deterministically(self) -> None:
+        seeds = [{"seed_id": str(index)} for index in range(20)]
+
+        selected = sample_pre_banger_seeds(seeds, 0.20, "seed")
+        selected_again = sample_pre_banger_seeds(seeds, 0.20, "seed")
+
+        self.assertEqual(len(selected), 4)
+        self.assertEqual(selected, selected_again)
+        self.assertNotEqual(selected, seeds[:2])
+
+    def test_pre_banger_seed_sampling_is_stratified_by_rank(self) -> None:
+        seeds = [{"seed_id": str(index)} for index in range(100)]
+
+        selected = sample_pre_banger_seeds(seeds, 0.20, "seed")
+        selected_indexes = [int(item["seed_id"]) for item in selected]
+
+        self.assertEqual(len(selected_indexes), 20)
+        for bucket_index, selected_index in enumerate(selected_indexes):
+            self.assertGreaterEqual(selected_index, bucket_index * 5)
+            self.assertLess(selected_index, (bucket_index + 1) * 5)
+
+    def test_pre_banger_seed_sampling_can_select_all(self) -> None:
+        seeds = [{"seed_id": str(index)} for index in range(20)]
+
+        self.assertEqual(sample_pre_banger_seeds(seeds, 1.0, "seed"), seeds)
+
+    def test_select_filtered_seeds_samples_before_limit(self) -> None:
+        seeds = [
+            {
+                "seed_id": str(index),
+                "combined_index": index,
+                "banger_timestamp": "2026-04-08T16:31:46.325Z",
+            }
+            for index in range(20)
+        ]
+        args = SimpleNamespace(
+            seed_ids=None,
+            banger_input_indexes=None,
+            start=0,
+            limit=3,
+            seed_sample_fraction=0.5,
+            seed_sample_seed="seed",
+        )
+        args_without_limit = SimpleNamespace(
+            seed_ids=None,
+            banger_input_indexes=None,
+            start=0,
+            limit=None,
+            seed_sample_fraction=0.5,
+            seed_sample_seed="seed",
+        )
+
+        selected = select_filtered_seeds(args, seeds)
+        sampled_without_limit = select_filtered_seeds(args_without_limit, seeds)
+
+        self.assertEqual(len(selected), 3)
+        self.assertEqual(len(sampled_without_limit), 10)
+        self.assertEqual(selected, sampled_without_limit[:3])
+
+    def test_parse_rejects_invalid_seed_sample_fraction(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "seed-sample-fraction"):
+            parse_args(["--seed-sample-fraction", "0"])
 
     def test_load_and_render_prompt_includes_hidden_seed_and_context(self) -> None:
         args = SimpleNamespace(

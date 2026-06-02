@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -48,6 +50,8 @@ from .question_context import (
 from .providers import build_provider_command
 
 SCREENSHOTS_DIR = "screenshots"
+DEFAULT_QUESTIONS_SAMPLE_FRACTION = 0.20
+DEFAULT_QUESTIONS_SAMPLE_SEED = "0"
 
 
 @dataclass(frozen=True)
@@ -1431,9 +1435,37 @@ def load_suggestions_from_bangers(args: argparse.Namespace) -> list[dict[str, An
                     suggestions.append(suggestion)
 
     selected = suggestions[args.start:]
+    selected = sample_question_suggestions(
+        selected,
+        getattr(args, "questions_sample_fraction", DEFAULT_QUESTIONS_SAMPLE_FRACTION),
+        getattr(args, "questions_sample_seed", DEFAULT_QUESTIONS_SAMPLE_SEED),
+    )
     if args.limit is not None:
         selected = selected[: args.limit]
     return selected
+
+
+def sample_question_suggestions(
+    suggestions: list[dict[str, Any]],
+    fraction: float,
+    seed: str | int | float | bytes | bytearray | None,
+) -> list[dict[str, Any]]:
+    if not suggestions or fraction >= 1:
+        return suggestions
+    if fraction <= 0:
+        raise RuntimeError(f"questions sample fraction must be greater than 0: {fraction}")
+
+    sample_size = max(1, math.floor(len(suggestions) * fraction))
+    if sample_size >= len(suggestions):
+        return suggestions
+
+    rng = random.Random(seed)
+    sampled_indexes = set(rng.sample(range(len(suggestions)), sample_size))
+    return [
+        suggestion
+        for index, suggestion in enumerate(suggestions)
+        if index in sampled_indexes
+    ]
 
 
 def print_questions_dry_run(
@@ -1537,6 +1569,8 @@ def run_questions_once(
         "goal_index": suggestion["_goal_index"],
         "opportunity_index": suggestion["_opportunity_index"],
         "question_context_event_count": len(context_events),
+        "questions_sample_fraction": args.questions_sample_fraction,
+        "questions_sample_seed": args.questions_sample_seed,
         "questions_path": str(output_path),
         "agent_isolated": not args.no_isolate_agent_workdir,
         "agent_visible_roots": ["logs-indexed", "agent-output"]
@@ -1607,6 +1641,11 @@ def run_questions(args: argparse.Namespace) -> int:
         raise SystemExit(f"no timestamped events found in {args.repo_root / 'logs-indexed'}")
 
     print(f"selected banger opportunities: {len(selected)}", file=sys.stderr)
+    print(
+        f"questions sample fraction: {args.questions_sample_fraction}",
+        file=sys.stderr,
+    )
+    print(f"questions sample seed: {args.questions_sample_seed}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
     print(f"jobs: {args.jobs}", file=sys.stderr)
     print(

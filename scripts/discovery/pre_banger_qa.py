@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import random
 import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -57,6 +59,8 @@ MAX_QAS_PER_RUN = 10
 THREAD_COUNT = 3
 MIN_QAS_PER_THREAD = 3
 MAX_QAS_PER_THREAD = 10
+DEFAULT_SEED_SAMPLE_FRACTION = 0.20
+DEFAULT_SEED_SAMPLE_SEED = "0"
 
 
 @dataclass(frozen=True)
@@ -210,6 +214,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start", type=int, default=0, help="Start offset after ranking.")
     parser.add_argument("--limit", type=int, help="Maximum number of ranked seeds to run.")
     parser.add_argument(
+        "--seed-sample-fraction",
+        type=float,
+        default=DEFAULT_SEED_SAMPLE_FRACTION,
+        help=(
+            "Sample this fraction of selected ranked seeds, stratified across "
+            "the ranking, before applying --limit. Defaults to 0.20; use 1.0 "
+            "to generate pre-banger QA for every selected seed."
+        ),
+    )
+    parser.add_argument(
+        "--seed-sample-seed",
+        default=DEFAULT_SEED_SAMPLE_SEED,
+        help=(
+            "Seed used for deterministic pre-banger seed sampling. Change this "
+            "to pick a different subset."
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Run even if the expected qa_<seed_id>.json output exists.",
@@ -331,6 +353,8 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit(f"--pairs-per-run must be at least {MIN_QAS_PER_RUN}")
     if args.pairs_per_run > MAX_QAS_PER_RUN:
         raise SystemExit(f"--pairs-per-run must be at most {MAX_QAS_PER_RUN}")
+    if args.seed_sample_fraction <= 0 or args.seed_sample_fraction > 1:
+        raise SystemExit("--seed-sample-fraction must be greater than 0 and at most 1")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
 
@@ -976,9 +1000,37 @@ def select_filtered_seeds(
         ]
 
     selected = selected[args.start :]
+    selected = sample_pre_banger_seeds(
+        selected,
+        getattr(args, "seed_sample_fraction", DEFAULT_SEED_SAMPLE_FRACTION),
+        getattr(args, "seed_sample_seed", DEFAULT_SEED_SAMPLE_SEED),
+    )
     if args.limit is not None:
         selected = selected[: args.limit]
     return selected
+
+
+def sample_pre_banger_seeds(
+    seeds: list[dict[str, Any]],
+    fraction: float,
+    seed: str | int | float | bytes | bytearray | None,
+) -> list[dict[str, Any]]:
+    if not seeds or fraction >= 1:
+        return seeds
+    if fraction <= 0:
+        raise RuntimeError(f"seed sample fraction must be greater than 0: {fraction}")
+
+    sample_size = max(1, math.floor(len(seeds) * fraction))
+    if sample_size >= len(seeds):
+        return seeds
+
+    rng = random.Random(seed)
+    sampled_indexes: set[int] = set()
+    for bucket_index in range(sample_size):
+        bucket_start = math.floor(bucket_index * len(seeds) / sample_size)
+        bucket_end = math.floor((bucket_index + 1) * len(seeds) / sample_size)
+        sampled_indexes.add(rng.randrange(bucket_start, bucket_end))
+    return [item for index, item in enumerate(seeds) if index in sampled_indexes]
 
 
 def context_for_seed(
@@ -1231,6 +1283,8 @@ def run_pre_banger_qa_once(
         "pre_banger_qa_dir": str(args.pre_banger_qa_dir),
         "qa_path": str(output_path),
         "question_context_event_count": len(context_events),
+        "seed_sample_fraction": args.seed_sample_fraction,
+        "seed_sample_seed": args.seed_sample_seed,
         "agent_isolated": not args.no_isolate_agent_workdir,
         "agent_visible_roots": ["logs-indexed", "agent-output"]
         if not args.no_isolate_agent_workdir
@@ -1457,6 +1511,11 @@ def run(args: argparse.Namespace) -> int:
         print(f"selected intervals: {len(interval_rows)}", file=sys.stderr)
     print(f"prompt-ranked pre-banger seeds: {len(ranked)}", file=sys.stderr)
     print(f"selected pre-banger seeds: {len(seeds)}", file=sys.stderr)
+    print(
+        f"pre-banger seed sample fraction: {args.seed_sample_fraction}",
+        file=sys.stderr,
+    )
+    print(f"pre-banger seed sample seed: {args.seed_sample_seed}", file=sys.stderr)
     print(f"selected pre-banger QA runs: {len(selected)}", file=sys.stderr)
     print(f"qa types: {', '.join(args.qa_types)}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
