@@ -1695,7 +1695,13 @@ def run_discovery(args: argparse.Namespace) -> int:
         raise SystemExit(f"repo root not found: {args.repo_root}")
 
     template = load_template(args.template, ("{candidate_row}",))
-    rows = select_rows(read_jsonl(args.intervals), args.interval_indexes, args.start, args.limit)
+    rows = select_rows(
+        read_jsonl(args.intervals),
+        args.interval_indexes,
+        args.days,
+        args.start,
+        args.limit,
+    )
     if not rows:
         print("no rows selected", file=sys.stderr)
         return 0

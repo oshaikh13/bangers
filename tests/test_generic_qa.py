@@ -13,16 +13,58 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from discovery.generic_qa import (
     context_for_interval,
+    final_generic_qa_path,
     load_generic_qa_template,
+    parse_args,
     parse_qa_types,
     validate_generic_qa_data,
     write_final_generic_qa,
 )
+from discovery.intervals import interval_indexes_for_days, select_rows
 from discovery.prompts import render_generic_qa_prompt
 from discovery.question_context import training_rows_from_final_questions
 
 
 class GenericQATests(unittest.TestCase):
+    def test_select_rows_accepts_zero_based_day_ranges(self) -> None:
+        rows = [
+            {
+                "interval_index": 0,
+                "start_local": "2026-04-06T00:00:00-07:00",
+            },
+            {
+                "interval_index": 1,
+                "start_local": "2026-04-06T00:15:00-07:00",
+            },
+            {
+                "interval_index": 2,
+                "start_local": "2026-04-07T00:00:00-07:00",
+            },
+            {
+                "interval_index": 3,
+                "start_local": "2026-04-08T00:00:00-07:00",
+            },
+        ]
+
+        self.assertEqual(interval_indexes_for_days(rows, "0"), {0, 1})
+        self.assertEqual(interval_indexes_for_days(rows, "1-2"), {2, 3})
+        self.assertEqual(
+            [row["interval_index"] for row in select_rows(rows, None, "0-1", 0, None)],
+            [0, 1, 2],
+        )
+        self.assertEqual(
+            [row["interval_index"] for row in select_rows(rows, "1-3", "1", 0, None)],
+            [2],
+        )
+
+    def test_day_alias_uses_day_scoped_final_path(self) -> None:
+        args = parse_args(["--day", "0-2"])
+
+        self.assertEqual(
+            final_generic_qa_path(args).name,
+            "final_qa_days_0-2.json",
+        )
+
     def test_parse_qa_types_expands_all_and_dedupes_specific_types(self) -> None:
         self.assertIn("activity_window", parse_qa_types("all"))
         self.assertIn("verbatim_textbox", parse_qa_types("all"))

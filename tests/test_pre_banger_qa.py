@@ -12,12 +12,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from discovery.pre_banger_qa import (
+    enrich_seed_filter_file,
+    ensure_daily_seed_filter_file,
     final_pre_banger_qa_path,
     load_pre_banger_qa_template,
     load_seed_filter,
     load_seed_filter_template,
+    merge_daily_seed_filters,
     parse_args,
     parse_qa_types,
+    ranked_seed_metadata,
+    seed_ranking_day,
     select_filtered_seeds,
     validate_seed_filter_data,
     validate_pre_banger_qa_data,
@@ -34,7 +39,7 @@ class PreBangerQATests(unittest.TestCase):
     def test_parse_qa_types_expands_all_and_dedupes(self) -> None:
         self.assertEqual(
             parse_qa_types("all"),
-            ["timing", "curiosity", "disregard", "threaded"],
+            ["timing", "curiosity", "disregard", "value", "threaded"],
         )
         self.assertEqual(
             parse_qa_types("curiosity,threaded,curiosity"),
@@ -47,10 +52,30 @@ class PreBangerQATests(unittest.TestCase):
         self.assertEqual(args.seed_filter_path.name, "seed_rankings.json")
         self.assertEqual(args.combined_bangers_path.name, "combined_bangers.json")
 
+    def test_day_runs_use_day_scoped_seed_ranking_path(self) -> None:
+        args = parse_args(["--day", "0-2"])
+
+        self.assertEqual(args.seed_filter_path.name, "seed_rankings_days_0-2.json")
+        self.assertEqual(args.combined_bangers_path.name, "combined_bangers.json")
+        self.assertEqual(
+            final_pre_banger_qa_path(args).name,
+            "final_qa_days_0-2.json",
+        )
+
     def test_seed_ranking_prompt_and_loader_preserve_scored_order(self) -> None:
         all_seeds = [
-            {"seed_id": "self_done", "banger_timestamp": 0.0},
-            {"seed_id": "cool_open", "banger_timestamp": 0.0},
+            {
+                "seed_id": "self_done",
+                "banger_timestamp": 0.0,
+                "suggestion": "I can prepare the obvious next step.",
+            },
+            {
+                "seed_id": "cool_open",
+                "banger_timestamp": 0.0,
+                "target_banger": {
+                    "suggestion": "I can synthesize the scattered context.",
+                },
+            },
         ]
         args = SimpleNamespace(
             seed_filter_template=REPO_ROOT / "prompts" / "20_pre_banger_filter.md"
@@ -67,6 +92,8 @@ class PreBangerQATests(unittest.TestCase):
         self.assertIn("intervention_value_now", prompt)
         self.assertIn("/tmp/combined_bangers.json", prompt)
         self.assertIn("top-level `seeds` array", prompt)
+        self.assertIn("one daily batch", prompt)
+        self.assertIn("compare against seeds from other days", prompt)
         self.assertIn("Include every candidate seed exactly once", prompt)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -118,27 +145,133 @@ class PreBangerQATests(unittest.TestCase):
             )
 
             validate_seed_filter_data(json.loads(filter_path.read_text()), all_seeds, filter_path)
+            enrich_seed_filter_file(filter_path, all_seeds)
             selected = load_seed_filter(filter_path, all_seeds)
+            persisted = json.loads(filter_path.read_text(encoding="utf-8"))
 
         self.assertEqual([seed["seed_id"] for seed in selected], ["cool_open", "self_done"])
+        self.assertEqual(
+            selected[0]["ranking_metadata"]["suggestion"],
+            "I can synthesize the scattered context.",
+        )
+        self.assertEqual(
+            selected[1]["ranking_metadata"]["suggestion"],
+            "I can prepare the obvious next step.",
+        )
         self.assertEqual(selected[0]["ranking_metadata"]["intervention_value_now"], 8)
+        self.assertEqual(selected[0]["ranking_metadata"]["rank_count"], 2)
+        self.assertEqual(selected[0]["ranking_metadata"]["rank_percentile"], 100.0)
+        self.assertEqual(selected[0]["ranking_metadata"]["value_estimate"], 100)
         self.assertEqual(selected[1]["ranking_metadata"]["intervention_posture"], "stay_quiet")
         self.assertEqual(selected[1]["ranking_metadata"]["negative_reason"], "self_done")
+        self.assertEqual(selected[1]["ranking_metadata"]["rank_percentile"], 0.0)
+        self.assertEqual(selected[1]["ranking_metadata"]["value_estimate"], 1)
 
-    def test_seed_ranking_rejects_binary_selection_label(self) -> None:
-        all_seeds = [{"seed_id": "old_shape", "banger_timestamp": 0.0}]
-        data = {
-            "seeds": [
-                {
-                    "rank": 1,
-                    "seed_id": "old_shape",
-                    "selection_label": "keep",
-                }
-            ]
-        }
+        self.assertEqual(
+            [seed["suggestion"] for seed in persisted["seeds"]],
+            [
+                "I can synthesize the scattered context.",
+                "I can prepare the obvious next step.",
+            ],
+        )
 
-        with self.assertRaisesRegex(RuntimeError, "must not include selection_label"):
-            validate_seed_filter_data(data, all_seeds, "seed_rankings.json")
+    def test_daily_seed_rankings_are_concatenated_with_within_day_metadata(self) -> None:
+        all_seeds = [
+            {
+                "seed_id": "day1_low",
+                "banger_timestamp": "2026-04-06T20:38:44.439Z",
+                "suggestion": "Lower value on day one.",
+            },
+            {
+                "seed_id": "day1_high",
+                "banger_timestamp": "2026-04-06T20:39:49.366Z",
+                "suggestion": "Higher value on day one.",
+            },
+            {
+                "seed_id": "day2_only",
+                "banger_timestamp": "2026-04-07T00:01:00Z",
+                "suggestion": "Only value on day two.",
+            },
+        ]
+        self.assertEqual(seed_ranking_day(all_seeds[0]), "2026-04-06")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            day1_path = tmp / "seed_rankings_2026-04-06.json"
+            day2_path = tmp / "seed_rankings_2026-04-07.json"
+            output_path = tmp / "seed_rankings.json"
+            day1_path.write_text(
+                json.dumps(
+                    {
+                        "seeds": [
+                            _ranked_seed("day1_high", 1, "none"),
+                            _ranked_seed("day1_low", 2, "self_done"),
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            day2_path.write_text(
+                json.dumps({"seeds": [_ranked_seed("day2_only", 1, "none")]}),
+                encoding="utf-8",
+            )
+
+            merge_daily_seed_filters(
+                [
+                    ("2026-04-06", all_seeds[:2], day1_path),
+                    ("2026-04-07", all_seeds[2:], day2_path),
+                ],
+                all_seeds,
+                output_path,
+            )
+            selected = load_seed_filter(output_path, all_seeds)
+            persisted = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            [seed["seed_id"] for seed in selected],
+            ["day1_high", "day1_low", "day2_only"],
+        )
+        self.assertEqual(selected[0]["ranking_metadata"]["rank"], 1)
+        self.assertEqual(selected[0]["ranking_metadata"]["day_rank"], 1)
+        self.assertEqual(selected[0]["ranking_metadata"]["day_rank_count"], 2)
+        self.assertEqual(selected[0]["ranking_metadata"]["rank_count"], 2)
+        self.assertEqual(selected[0]["ranking_metadata"]["value_estimate"], 100)
+        self.assertEqual(selected[1]["ranking_metadata"]["day_rank"], 2)
+        self.assertEqual(selected[1]["ranking_metadata"]["value_estimate"], 1)
+        self.assertEqual(selected[2]["ranking_metadata"]["rank"], 3)
+        self.assertEqual(selected[2]["ranking_metadata"]["day_rank_count"], 1)
+        self.assertEqual(selected[2]["ranking_metadata"]["value_estimate"], 100)
+        self.assertEqual(persisted["rank_scope"], "utc_day")
+        self.assertEqual(
+            [seed["rank_day"] for seed in persisted["seeds"]],
+            ["2026-04-06", "2026-04-06", "2026-04-07"],
+        )
+
+    def test_existing_non_daily_seed_ranking_is_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "seed_rankings.json"
+            path.write_text(json.dumps({"seeds": []}), encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "daily ranking"):
+                ensure_daily_seed_filter_file(path)
+
+    def test_ranked_seed_metadata_derives_continuous_value_estimate(self) -> None:
+        self.assertEqual(
+            ranked_seed_metadata({"rank": 1, "seed_id": "only"}, 1)["value_estimate"],
+            100,
+        )
+        self.assertEqual(
+            ranked_seed_metadata({"rank": 1, "seed_id": "first"}, 5)["value_estimate"],
+            100,
+        )
+
+        middle = ranked_seed_metadata({"rank": 3, "seed_id": "middle"}, 5)
+        self.assertEqual(middle["rank_percentile"], 50.0)
+        self.assertEqual(middle["value_estimate"], 50)
+
+        last = ranked_seed_metadata({"rank": 5, "seed_id": "last"}, 5)
+        self.assertEqual(last["rank_percentile"], 0.0)
+        self.assertEqual(last["value_estimate"], 1)
 
     def test_select_filtered_seeds_combines_interval_and_start_limit(self) -> None:
         seeds = [
@@ -201,8 +334,37 @@ class PreBangerQATests(unittest.TestCase):
         self.assertIn("attention, preferences, beliefs", prompt)
         self.assertIn("/tmp/qa_29_0_0.json", prompt)
 
+    def test_value_prompt_requires_1_to_100_estimate_and_anti_leak_rules(self) -> None:
+        args = SimpleNamespace(
+            common_template=REPO_ROOT / "prompts" / "20_pre_banger_common.md",
+            prompts_dir=REPO_ROOT / "prompts",
+        )
+        template = load_pre_banger_qa_template(args, "value")
+
+        prompt = render_pre_banger_qa_prompt(
+            template,
+            "value",
+            _seed(),
+            [_context_event()],
+            Path("/tmp/qa_29_0_0.json"),
+            "codex",
+            6,
+        )
+
+        self.assertIn("QA Type: Pre-Banger Value", prompt)
+        self.assertIn("1 to 100", prompt)
+        self.assertIn("Keep the question generic", prompt)
+        self.assertIn("Do not start questions with a context-preface", prompt)
+        self.assertIn("Every answer must start with the numeric estimate", prompt)
+        self.assertIn('"value_estimate": 84', prompt)
+        self.assertIn("must not say \"value percentile\"", prompt)
+        self.assertIn("Do not summarize the hidden artifact", prompt)
+
     def test_validate_pre_banger_accepts_flat_payload(self) -> None:
         validate_pre_banger_qa_data(_valid_flat_payload(), "qa.json")
+
+    def test_validate_pre_banger_accepts_value_payload(self) -> None:
+        validate_pre_banger_qa_data(_valid_flat_payload("value"), "qa.json")
 
     def test_validate_pre_banger_accepts_threaded_payload(self) -> None:
         validate_pre_banger_qa_data(_valid_threaded_payload(), "qa.json")
@@ -218,11 +380,17 @@ class PreBangerQATests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             pre_banger_dir = Path(tmp_dir) / "20_pre_banger_qa"
             curiosity_dir = pre_banger_dir / "curiosity"
+            value_dir = pre_banger_dir / "value"
             threaded_dir = pre_banger_dir / "threaded"
             curiosity_dir.mkdir(parents=True)
+            value_dir.mkdir(parents=True)
             threaded_dir.mkdir(parents=True)
             (curiosity_dir / "qa_29_0_0.json").write_text(
                 json.dumps(_valid_flat_payload()),
+                encoding="utf-8",
+            )
+            (value_dir / "qa_29_0_0.json").write_text(
+                json.dumps(_valid_flat_payload("value")),
                 encoding="utf-8",
             )
             (threaded_dir / "qa_29_0_0.json").write_text(
@@ -235,8 +403,11 @@ class PreBangerQATests(unittest.TestCase):
             )
 
             final_data = json.loads((pre_banger_dir / "final_qa.json").read_text())
-            self.assertEqual(len(final_data), 2)
-            self.assertEqual({item["qa_type"] for item in final_data}, {"curiosity", "threaded"})
+            self.assertEqual(len(final_data), 3)
+            self.assertEqual(
+                {item["qa_type"] for item in final_data},
+                {"curiosity", "value", "threaded"},
+            )
 
     def test_write_final_pre_banger_qa_uses_interval_specific_filename(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -308,8 +479,33 @@ def _seed() -> dict:
             "intervention_value_now": 8,
             "intervention_posture": "surface_now",
             "negative_reason": "none",
+            "rank_count": 20,
+            "rank_percentile": 84.21,
+            "value_estimate": 84,
             "timing_reason": "The user is at a high-leverage intervention moment.",
         },
+    }
+
+
+def _ranked_seed(seed_id: str, rank: int, negative_reason: str) -> dict:
+    posture = "surface_now" if negative_reason == "none" else "stay_quiet"
+    return {
+        "rank": rank,
+        "seed_id": seed_id,
+        "user_value": 8,
+        "intervention_value_now": 8 if negative_reason == "none" else 2,
+        "intervention_posture": posture,
+        "negative_reason": negative_reason,
+        "engagement_pull": 7,
+        "surprise": 6,
+        "personal_relevance": 8,
+        "disregard": 4,
+        "grounding": 8,
+        "self_done_penalty": 2 if negative_reason == "none" else 9,
+        "timing_reason": "The timing is assessed for this day.",
+        "marginal_value_reason": "The assistant's marginal value is estimated.",
+        "self_done_reason": "The user may or may not do it themselves.",
+        "future_check": "Future logs are used to calibrate the label.",
     }
 
 
@@ -319,11 +515,12 @@ def _pair(
     category: str,
     answer_basis: str = "H+F",
     verify_at_ts: float = 101.0,
+    answer: str = "The assistant should surface help now because it would add timely marginal value.",
 ) -> dict:
     return {
         "q_id": q_id,
         "question": question,
-        "answer": "The assistant should surface help now because it would add timely marginal value.",
+        "answer": answer,
         "category": category,
         "timescale": "micro",
         "answer_basis": answer_basis,
@@ -341,17 +538,40 @@ def _pair(
 
 def _valid_flat_payload(qa_type: str = "curiosity") -> dict:
     category = f"pre_banger_{qa_type}"
+    if qa_type == "value":
+        qa_pairs = [
+            _pair(
+                0,
+                "Estimate on a 1 to 100 scale how worthwhile proactive help would be here, and give the reason.",
+                category,
+                answer="84. The user appears to have enough friction that concise help would likely add value.",
+            ),
+            _pair(
+                1,
+                "On a 1 to 100 scale, how much value would help add for the user here, and why?",
+                category,
+                answer="84. The visible context suggests help could reduce effort without needing to expose the hidden artifact.",
+            ),
+            _pair(
+                2,
+                "Estimate how worth surfacing this is on a 1 to 100 scale, with the reason.",
+                category,
+                answer="84. The user-state signal is strong enough that proactive help would probably be worthwhile.",
+            ),
+        ]
+    else:
+        qa_pairs = [
+            _pair(0, "What would the user be curious to see right now?", category),
+            _pair(1, "Is now a good moment for the assistant to help?", category),
+            _pair(2, "What would the user likely do without help?", category),
+        ]
     return {
         "qa_type": qa_type,
         "seed_id": "29_0_0",
         "banger_timestamp": 100.0,
         "target_banger": {"suggestion": "hidden"},
         "context_events": [_context_event()],
-        "qa_pairs": [
-            _pair(0, "What would the user be curious to see right now?", category),
-            _pair(1, "Is now a good moment for the assistant to help?", category),
-            _pair(2, "What would the user likely do without help?", category),
-        ],
+        "qa_pairs": qa_pairs,
     }
 
 

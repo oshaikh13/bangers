@@ -137,6 +137,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--interval-indexes",
         help="Comma-separated interval indexes or ranges to run, e.g. `0,3,10-12`.",
     )
+    parser.add_argument(
+        "--days",
+        "--day",
+        dest="days",
+        help=(
+            "Comma-separated zero-based day numbers or ranges to run, e.g. "
+            "`0` or `0-4`. Days are derived from interval row start dates."
+        ),
+    )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
     parser.add_argument("--limit", type=int, help="Maximum number of interval rows to run.")
     parser.add_argument(
@@ -577,9 +586,54 @@ def remove_stale_final_if_needed(path: Path) -> None:
         path.unlink()
 
 
+def interval_indexes_slug(raw: str) -> str:
+    return (
+        raw.strip()
+        .replace(",", "_")
+        .replace("-", "-")
+        .replace(" ", "")
+        or "selected"
+    )
+
+
+def final_generic_qa_path(args: argparse.Namespace) -> Path:
+    interval_indexes = getattr(args, "interval_indexes", None)
+    days = getattr(args, "days", None)
+    if interval_indexes:
+        return args.generic_qa_dir / f"final_qa_intervals_{interval_indexes_slug(interval_indexes)}.json"
+    if days:
+        return args.generic_qa_dir / f"final_qa_days_{interval_indexes_slug(days)}.json"
+    return args.generic_qa_dir / "final_qa.json"
+
+
+def selected_final_interval_indexes(args: argparse.Namespace) -> set[int] | None:
+    interval_indexes = getattr(args, "interval_indexes", None)
+    days = getattr(args, "days", None)
+    intervals = getattr(args, "intervals", None)
+    if not interval_indexes and not days:
+        return None
+    if intervals is None:
+        return None
+    rows = select_rows(
+        read_jsonl(intervals),
+        interval_indexes,
+        days,
+        getattr(args, "start", 0),
+        getattr(args, "limit", None),
+    )
+    return {
+        int(row["interval_index"])
+        for row in rows
+        if isinstance(row.get("interval_index"), int)
+    }
+
+
 def write_final_generic_qa(args: argparse.Namespace) -> None:
     final_items: list[dict[str, Any]] = []
+    selected_indexes = selected_final_interval_indexes(args)
     for qa_type, interval_index, path in iter_generic_qa_files(args.generic_qa_dir):
+        if selected_indexes is not None and interval_index not in selected_indexes:
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
@@ -595,7 +649,7 @@ def write_final_generic_qa(args: argparse.Namespace) -> None:
             }
         )
 
-    final_path = args.generic_qa_dir / "final_qa.json"
+    final_path = final_generic_qa_path(args)
     if not final_items:
         remove_stale_final_if_needed(final_path)
         print(f"no generic QA files found under {args.generic_qa_dir}", file=sys.stderr)
@@ -622,6 +676,7 @@ def run(args: argparse.Namespace) -> int:
     rows = select_rows(
         read_jsonl(args.intervals),
         args.interval_indexes,
+        args.days,
         args.start,
         args.limit,
     )

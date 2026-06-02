@@ -100,6 +100,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated interval indexes or ranges to run, e.g. `0,3,10-12`.",
     )
     parser.add_argument(
+        "--days",
+        "--day",
+        dest="days",
+        help=(
+            "Comma-separated zero-based day numbers or ranges to run, e.g. "
+            "`0` or `0-4`. Days are derived from interval row start dates."
+        ),
+    )
+    parser.add_argument(
         "--banger-input-indexes",
         dest="banger_input_indexes",
         help=(
@@ -203,7 +212,7 @@ def add_codex_args(parser: argparse.ArgumentParser) -> None:
     )
     group.add_argument(
         "--codex-reasoning-effort",
-        default="xhigh",
+        default="high",
         help="Reasoning effort passed to Codex.",
     )
     group.add_argument(
@@ -243,7 +252,7 @@ def add_claude_args(parser: argparse.ArgumentParser) -> None:
     )
     group.add_argument(
         "--claude-effort",
-        default="xhigh",
+        default="high",
         choices=("low", "medium", "high", "xhigh", "max"),
         help="Effort level passed to Claude.",
     )
@@ -329,10 +338,10 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--banger-batch-size must be greater than 0")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
-    if (args.questions or args.bangers) and args.interval_indexes:
+    if (args.questions or args.bangers) and (args.interval_indexes or args.days):
         raise SystemExit(
-            "--interval-indexes selects discovery intervals; use --banger-input-indexes "
-            "with --bangers or --questions"
+            "--interval-indexes/--days select discovery intervals; use "
+            "--banger-input-indexes with --bangers or --questions"
         )
     if args.banger_input_indexes and not (args.questions or args.bangers):
         raise SystemExit("--banger-input-indexes requires --bangers or --questions")
