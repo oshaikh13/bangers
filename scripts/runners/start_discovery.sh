@@ -9,6 +9,7 @@ day_selector=""
 banger_batch_size="5"
 skip_setup="false"
 effort="high"
+force="false"
 
 usage() {
   cat <<'EOF'
@@ -26,6 +27,7 @@ Options:
                                 provider flag: codex --codex-reasoning-effort
                                 (freeform, default high), claude --claude-effort
                                 (low|medium|high|xhigh|max). Default: high.
+  --force                       Rerun stages even when their outputs exist
   --skip-setup                  Skip uv sync, indexing, and interval recording
   -h, --help                    Show this help
 
@@ -68,6 +70,10 @@ while [[ $# -gt 0 ]]; do
     --effort)
       effort="$2"
       shift 2
+      ;;
+    --force)
+      force="true"
+      shift
       ;;
     --skip-setup)
       skip_setup="true"
@@ -113,6 +119,16 @@ if [[ -n "$effort" ]]; then
   esac
 fi
 
+run_stage() {
+  local runner="$1"
+  shift
+  local cmd=(uv run "$runner" "$@")
+  if [[ "$force" == "true" ]]; then
+    cmd+=(--force)
+  fi
+  "${cmd[@]}"
+}
+
 stage_dir() {
   local stage="$1"
   if [[ "$scope_slug" == "global" ]]; then
@@ -142,25 +158,23 @@ run_interval_discovery() {
 }
 
 run_aggregate_discovery() {
-  uv run scripts/runners/run_discovery_combine.py \
+  run_stage scripts/runners/run_discovery_combine.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
-    "${effort_args[@]}" \
-    --force
+    "${effort_args[@]}"
 
-  uv run scripts/runners/run_discovery_bridges.py \
+  run_stage scripts/runners/run_discovery_bridges.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
-    "${effort_args[@]}" \
-    --force
+    "${effort_args[@]}"
 
   uv run scripts/build_suggestion_inputs.py \
     --discovery-dir "$discovery_dir" \
     "${day_args[@]}"
 
-  uv run scripts/runners/run_discovery_bangers.py \
+  run_stage scripts/runners/run_discovery_bangers.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
@@ -173,7 +187,7 @@ run_aggregate_discovery() {
     --discovery-dir "$discovery_dir" \
     "${day_args[@]}"
 
-  uv run scripts/runners/run_discovery_questions.py \
+  run_stage scripts/runners/run_discovery_questions.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
@@ -187,7 +201,7 @@ run_aggregate_discovery() {
 }
 
 run_generic_qa() {
-  uv run scripts/runners/run_generic_qa.py \
+  run_stage scripts/runners/run_generic_qa.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
@@ -205,7 +219,7 @@ run_generic_qa() {
 }
 
 run_pre_banger_qa() {
-  uv run scripts/runners/run_pre_banger_qa.py \
+  run_stage scripts/runners/run_pre_banger_qa.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
     "${day_args[@]}" \
