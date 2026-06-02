@@ -10,3 +10,4 @@ data/
 .claude/
 data-bak/
 tinker-cookbook/
+tmp_*
