@@ -19,9 +19,13 @@ def parse_timestamp(value: Any) -> float | None:
         return None
 
     timestamp = value
-    if "Z-" in timestamp:
-        # Some banger seeds cover a short discovery window. Use the end of the
-        # window as the context cutoff, when the suggestion is fully grounded.
+    # Some banger seeds cover a short discovery window expressed as start/end,
+    # using either an ISO-8601 "/" separator or the legacy "Z-" separator. Use
+    # the end of the window as the context cutoff, when the suggestion is fully
+    # grounded.
+    if "/" in timestamp:
+        timestamp = timestamp.rsplit("/", 1)[1].strip()
+    elif "Z-" in timestamp:
         timestamp = timestamp.rsplit("Z-", 1)[1]
     if timestamp.endswith("Z"):
         timestamp = f"{timestamp[:-1]}+00:00"

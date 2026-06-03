@@ -1,6 +1,20 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
+
+
+def interval_day_key(row: dict[str, Any]) -> str:
+    for key in ("start_local", "start_utc"):
+        value = row.get(key)
+        if isinstance(value, str) and len(value) >= 10:
+            return value[:10]
+
+    ts = row.get("start_ts")
+    if isinstance(ts, (int, float)):
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).date().isoformat()
+
+    raise RuntimeError(f"could not derive interval day: {row}")
 
 
 def parse_interval_indexes(raw: str | None) -> set[int] | None:
