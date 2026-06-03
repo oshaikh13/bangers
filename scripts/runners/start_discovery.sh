@@ -3,9 +3,10 @@ set -euo pipefail
 
 provider="codex"
 interval_minutes="15"
+interval_range=""
+run_id=""
 jobs="4"
 phase="all"
-day_selector=""
 banger_batch_size="5"
 skip_setup="false"
 effort="high"
@@ -14,30 +15,30 @@ force="false"
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/runners/start_discovery.sh [options]
+  scripts/runners/start_discovery.sh --interval-range START-END [options]
 
 Options:
   --provider codex|claude       Provider to use. Default: codex
   --interval-minutes N          Interval size. Default: 15
+  --interval-range START-END    Inclusive interval index range, e.g. 0-42
+  --run-id ID                   Versioned run id. Defaults to new for 02/all, latest otherwise
   --jobs N                      Parallel model calls where supported. Default: 4
-  --day RANGE, --days RANGE     Zero-based day selector, e.g. 0 or 1-5
-  --phase NAME                  all, setup, interval, aggregate, qa, pre-banger. Default: all
+  --phase NAME                  all, setup, 01_q_only, 02_goals, 03_bangers,
+                                04_b_to_q, 05_q_to_b. Default: all
   --banger-batch-size N         Batch size for banger generation. Default: 5
-  --effort LEVEL                Reasoning effort for model stages. Maps to the
-                                provider flag: codex --codex-reasoning-effort
-                                (freeform, default high), claude --claude-effort
-                                (low|medium|high|xhigh|max). Default: high.
+  --effort LEVEL                Reasoning effort for model stages. Default: high
   --force                       Rerun stages even when their outputs exist
   --skip-setup                  Skip uv sync, indexing, and interval recording
   -h, --help                    Show this help
 
 Phases:
-  all         Setup, interval discovery, aggregate discovery, QA, and pre-banger QA
+  all         Setup, 01_q_only, 02_goals, 03_bangers, 04_b_to_q, and 05_q_to_b
   setup       uv sync, indexing, and interval recording
-  interval    Discovery goals and generic QA for the selected interval/day shard
-  aggregate   Combine, bridges, suggestion inputs, bangers, questions, and export
-  qa          Generic QA only
-  pre-banger  Pre-banger QA only
+  01_q_only   Generic interval QA cache
+  02_goals    Interval goals, combined goals, and bridge goals
+  03_bangers  Banger inputs, banger generation, manifest, and seed ranking
+  04_b_to_q   Discovery questions from bangers
+  05_q_to_b   Pre-banger questions from ranked bangers
 EOF
 }
 
@@ -51,12 +52,16 @@ while [[ $# -gt 0 ]]; do
       interval_minutes="$2"
       shift 2
       ;;
-    --jobs)
-      jobs="$2"
+    --interval-range)
+      interval_range="$2"
       shift 2
       ;;
-    --day|--days)
-      day_selector="$2"
+    --run-id)
+      run_id="$2"
+      shift 2
+      ;;
+    --jobs)
+      jobs="$2"
       shift 2
       ;;
     --phase)
@@ -92,7 +97,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$phase" in
-  all|setup|interval|aggregate|qa|pre-banger) ;;
+  all|setup|01_q_only|02_goals|03_bangers|04_b_to_q|05_q_to_b) ;;
   *)
     echo "invalid --phase: $phase" >&2
     usage >&2
@@ -100,16 +105,15 @@ case "$phase" in
     ;;
 esac
 
-discovery_dir="discovery_${provider}_${interval_minutes}m"
-day_args=()
-day_suffix=""
-scope_slug="global"
-if [[ -n "$day_selector" ]]; then
-  day_args=(--day "$day_selector")
-  day_suffix="${day_selector//,/_}"
-  day_suffix="${day_suffix// /}"
-  scope_slug="days_${day_suffix}"
+if [[ "$phase" != "setup" && -z "$interval_range" ]]; then
+  echo "--interval-range is required for phase $phase" >&2
+  usage >&2
+  exit 2
 fi
+
+discovery_dir="discovery_${provider}_${interval_minutes}m"
+scope_slug="intervals_${interval_range}"
+run_root=""
 
 effort_args=()
 if [[ -n "$effort" ]]; then
@@ -117,6 +121,11 @@ if [[ -n "$effort" ]]; then
     codex) effort_args=(--codex-reasoning-effort "$effort") ;;
     claude) effort_args=(--claude-effort "$effort") ;;
   esac
+fi
+
+run_args=()
+if [[ "$phase" != "setup" ]]; then
+  run_args=(--interval-range "$interval_range")
 fi
 
 run_stage() {
@@ -129,13 +138,35 @@ run_stage() {
   "${cmd[@]}"
 }
 
-stage_dir() {
-  local stage="$1"
-  if [[ "$scope_slug" == "global" ]]; then
-    printf '%s/%s' "$discovery_dir" "$stage"
-  else
-    printf '%s/%s/%s' "$discovery_dir" "$stage" "$scope_slug"
+resolve_run_root() {
+  if [[ -n "$run_root" || "$phase" == "setup" ]]; then
+    return
   fi
+
+  local selected_run_id="$run_id"
+  if [[ -z "$selected_run_id" ]]; then
+    case "$phase" in
+      all|02_goals)
+        selected_run_id="$(date -u +%Y%m%dT%H%M%SZ)"
+        ;;
+      *)
+        local scope_dir="$discovery_dir/$scope_slug"
+        if [[ ! -d "$scope_dir" ]]; then
+          echo "no runs found for $scope_slug under $discovery_dir" >&2
+          exit 2
+        fi
+        selected_run_id="$(find "$scope_dir" -mindepth 1 -maxdepth 1 -type d -print | sort | tail -1 | xargs basename)"
+        if [[ -z "$selected_run_id" ]]; then
+          echo "no runs found for $scope_slug under $discovery_dir" >&2
+          exit 2
+        fi
+        ;;
+    esac
+  fi
+
+  run_id="$selected_run_id"
+  run_root="$discovery_dir/$scope_slug/$run_id"
+  echo "using run root: $run_root" >&2
 }
 
 run_setup() {
@@ -147,117 +178,136 @@ run_setup() {
   uv run scripts/record_intervals.py "$interval_minutes"
 }
 
-run_interval_discovery() {
-  uv run scripts/runners/run_discovery_goals.py \
+run_q_only() {
+  run_stage scripts/runners/run_generic_qa.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
-    "${day_args[@]}" \
+    "${run_args[@]}" \
+    "${effort_args[@]}" \
+    --qa-types all \
+    --jobs "$jobs" \
+    --continue-on-error
+
+  local dir="$discovery_dir/01_q_only/$scope_slug"
+  uv run scripts/export_training_questions.py \
+    --input "$dir/final_qa.json" \
+    --output "$dir/training_questions.jsonl"
+}
+
+run_goals() {
+  resolve_run_root
+  run_stage scripts/runners/run_discovery_goals.py \
+    --provider "$provider" \
+    --interval-minutes "$interval_minutes" \
+    "${run_args[@]}" \
+    --run-root "$run_root" \
     "${effort_args[@]}" \
     --jobs "$jobs" \
     --continue-on-error
-}
 
-run_aggregate_discovery() {
   run_stage scripts/runners/run_discovery_combine.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
-    "${day_args[@]}" \
+    "${run_args[@]}" \
+    --run-root "$run_root" \
     "${effort_args[@]}"
 
   run_stage scripts/runners/run_discovery_bridges.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
-    "${day_args[@]}" \
+    "${run_args[@]}" \
+    --run-root "$run_root" \
     "${effort_args[@]}"
+}
 
-  uv run scripts/build_suggestion_inputs.py \
+run_bangers() {
+  resolve_run_root
+  run_stage scripts/build_suggestion_inputs.py \
     --discovery-dir "$discovery_dir" \
-    "${day_args[@]}"
+    "${run_args[@]}" \
+    --run-root "$run_root"
 
   run_stage scripts/runners/run_discovery_bangers.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
-    "${day_args[@]}" \
+    "${run_args[@]}" \
+    --run-root "$run_root" \
     "${effort_args[@]}" \
     --jobs "$jobs" \
     --banger-batch-size "$banger_batch_size" \
     --continue-on-error
 
-  uv run scripts/combine_bangers.py \
+  run_stage scripts/combine_bangers.py \
     --discovery-dir "$discovery_dir" \
-    "${day_args[@]}"
+    "${run_args[@]}" \
+    --run-root "$run_root"
 
+  run_stage scripts/runners/run_banger_ranking.py \
+    --provider "$provider" \
+    --interval-minutes "$interval_minutes" \
+    "${run_args[@]}" \
+    --run-root "$run_root" \
+    "${effort_args[@]}"
+}
+
+run_b_to_q() {
+  resolve_run_root
   run_stage scripts/runners/run_discovery_questions.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
-    "${day_args[@]}" \
+    "${run_args[@]}" \
+    --run-root "$run_root" \
     "${effort_args[@]}" \
     --jobs "$jobs" \
     --continue-on-error
 
   uv run scripts/export_training_questions.py \
-    --input "$(stage_dir 04_questions)/final_questions.json" \
-    --output "$(stage_dir 04_questions)/training_questions.jsonl"
+    --input "$run_root/04_b_to_q/final_qa.json" \
+    --output "$run_root/04_b_to_q/training_questions.jsonl"
 }
 
-run_generic_qa() {
-  run_stage scripts/runners/run_generic_qa.py \
-    --provider "$provider" \
-    --interval-minutes "$interval_minutes" \
-    "${day_args[@]}" \
-    "${effort_args[@]}" \
-    --qa-types all \
-    --jobs "$jobs" \
-    --continue-on-error
-
-  local input="$(stage_dir 10_generic_qa)/final_qa.json"
-  local output="$(stage_dir 10_generic_qa)/training_questions.jsonl"
-
-  uv run scripts/export_training_questions.py \
-    --input "$input" \
-    --output "$output"
-}
-
-run_pre_banger_qa() {
+run_q_to_b() {
+  resolve_run_root
   run_stage scripts/runners/run_pre_banger_qa.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \
-    "${day_args[@]}" \
+    "${run_args[@]}" \
+    --run-root "$run_root" \
     "${effort_args[@]}" \
     --qa-types all \
     --jobs "$jobs" \
     --continue-on-error
 
-  local input="$(stage_dir 20_pre_banger_qa)/final_qa.json"
-  local output="$(stage_dir 20_pre_banger_qa)/training_questions.jsonl"
-
   uv run scripts/export_training_questions.py \
-    --input "$input" \
-    --output "$output"
+    --input "$run_root/05_q_to_b/final_qa.json" \
+    --output "$run_root/05_q_to_b/training_questions.jsonl"
 }
 
 case "$phase" in
   all)
     run_setup
-    run_interval_discovery
-    run_aggregate_discovery
-    run_generic_qa
-    run_pre_banger_qa
+    run_q_only
+    run_goals
+    run_bangers
+    run_b_to_q
+    run_q_to_b
     ;;
   setup)
     run_setup
     ;;
-  interval)
-    run_interval_discovery
-    run_generic_qa
+  01_q_only)
+    run_q_only
     ;;
-  aggregate)
-    run_aggregate_discovery
+  02_goals)
+    run_goals
     ;;
-  qa)
-    run_generic_qa
+  03_bangers)
+    run_bangers
     ;;
-  pre-banger)
-    run_pre_banger_qa
+  04_b_to_q)
+    run_b_to_q
+    ;;
+  05_q_to_b)
+    run_q_to_b
     ;;
 esac

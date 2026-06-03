@@ -48,6 +48,7 @@ from .question_context import (
     load_indexed_events,
 )
 from .providers import build_provider_command
+from .scoping import update_run_manifest
 
 SCREENSHOTS_DIR = "screenshots"
 DEFAULT_QUESTIONS_SAMPLE_FRACTION = 0.10
@@ -336,11 +337,7 @@ def goal_files(goals_dir: Path) -> list[Path]:
 
 
 def combine_goal_files(args: argparse.Namespace) -> list[Path]:
-    if getattr(args, "scope_slug", "global") != "global":
-        return goal_files(args.goals_dir)
-
-    base_goals_dir = args.discovery_dir / "01_goals"
-    return sorted(base_goals_dir.glob("days_*/goal_*.json"))
+    return goal_files(args.goals_dir)
 
 
 def validate_combined_json(path: Path) -> None:
@@ -623,6 +620,7 @@ def run_combine(args: argparse.Namespace) -> int:
     combined_path = args.combined_dir / "combined.json"
     if combined_path.exists() and not args.force:
         print(f"skip combine: {combined_path} exists", file=sys.stderr)
+        update_run_manifest(args, "02_goals:combine")
         return 0
 
     print(f"selected goal files: {len(files)}", file=sys.stderr)
@@ -647,6 +645,7 @@ def run_combine(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    update_run_manifest(args, "02_goals:combine")
     return 0
 
 
@@ -795,6 +794,7 @@ def run_bridges(args: argparse.Namespace) -> int:
     bridges_path = args.bridges_dir / "bridges.json"
     if bridges_path.exists() and not args.force:
         print(f"skip bridges: {bridges_path} exists", file=sys.stderr)
+        update_run_manifest(args, "02_goals:bridges")
         return 0
 
     print(f"combined path: {combined_path}", file=sys.stderr)
@@ -819,6 +819,7 @@ def run_bridges(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    update_run_manifest(args, "02_goals:bridges")
     return 0
 
 
@@ -1251,6 +1252,7 @@ def run_bangers(args: argparse.Namespace) -> int:
         return 0
 
     if not selected_to_run:
+        update_run_manifest(args, "03_bangers")
         return 0
 
     args.bangers_dir.mkdir(parents=True, exist_ok=True)
@@ -1312,7 +1314,10 @@ def run_bangers(args: argparse.Namespace) -> int:
                         pending.cancel()
                     return 1
 
-    return 1 if failures else 0
+    if failures:
+        return 1
+    update_run_manifest(args, "03_bangers")
+    return 0
 
 
 def questions_path(args: argparse.Namespace, suggestion: dict[str, Any]) -> Path:
@@ -1621,11 +1626,11 @@ def write_final_questions(
             }
         )
 
-    final_path = args.questions_dir / "final_questions.json"
+    final_path = args.questions_dir / "final_qa.json"
     tmp = final_path.with_name(f".{final_path.name}.tmp.{os.getpid()}")
     tmp.write_text(json.dumps(final_items, indent=2, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, final_path)
-    print(f"wrote final questions -> {final_path}", file=sys.stderr)
+    print(f"wrote final QA -> {final_path}", file=sys.stderr)
 
 
 def run_questions(args: argparse.Namespace) -> int:
@@ -1675,6 +1680,7 @@ def run_questions(args: argparse.Namespace) -> int:
         return 0
     if not selected_to_run:
         write_final_questions(args, selected, indexed_events)
+        update_run_manifest(args, "04_b_to_q")
         return 0
 
     args.questions_dir.mkdir(parents=True, exist_ok=True)
@@ -1734,6 +1740,7 @@ def run_questions(args: argparse.Namespace) -> int:
     if failures:
         return 1
     write_final_questions(args, selected, indexed_events)
+    update_run_manifest(args, "04_b_to_q")
     return 0
 
 
@@ -1746,8 +1753,7 @@ def run_discovery(args: argparse.Namespace) -> int:
     template = load_template(args.template, ("{candidate_row}",))
     rows = select_rows(
         read_jsonl(args.intervals),
-        args.interval_indexes,
-        args.days,
+        args.interval_range,
         args.start,
         args.limit,
     )
@@ -1755,6 +1761,8 @@ def run_discovery(args: argparse.Namespace) -> int:
         print("no rows selected", file=sys.stderr)
         return 0
     validate_unique_interval_indexes(rows)
+    if not args.dry_run:
+        update_run_manifest(args, "02_goals:goals", rows, status="started")
 
     args.goals_dir.mkdir(parents=True, exist_ok=True)
     print(f"selected rows: {len(rows)}", file=sys.stderr)
@@ -1779,7 +1787,10 @@ def run_discovery(args: argparse.Namespace) -> int:
         else:
             rows_to_run.append(row)
 
-    if args.dry_run or not rows_to_run:
+    if args.dry_run:
+        return 0
+    if not rows_to_run:
+        update_run_manifest(args, "02_goals:goals", rows)
         return 0
 
     failures = 0
@@ -1826,7 +1837,10 @@ def run_discovery(args: argparse.Namespace) -> int:
                         pending.cancel()
                     return 1
 
-    return 1 if failures else 0
+    if failures:
+        return 1
+    update_run_manifest(args, "02_goals:goals", rows)
+    return 0
 
 
 def run(args: argparse.Namespace) -> int:

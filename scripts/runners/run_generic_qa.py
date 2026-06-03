@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run pipeline 10 generic QA generation."""
+"""Run 01_q_only generic QA generation."""
 
 from __future__ import annotations
 

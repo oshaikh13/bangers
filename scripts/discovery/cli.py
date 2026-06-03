@@ -19,7 +19,7 @@ from .runner import (
     DEFAULT_QUESTIONS_SAMPLE_SEED,
     run,
 )
-from .scoping import scoped_stage_dir, scope_slug
+from .scoping import latest_run_id, new_run_id, run_root_for, scope_slug
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,23 +33,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--combine",
         action="store_true",
         help=(
-            "Run prompts/02a_discovery_combine.md over 01_goals and write "
-            "02a_combined/combined.json."
+            "Run prompts/02_goals/combine.md over 02_goals/goals and write "
+            "02_goals/combined/combined.json."
         ),
     )
     mode_group.add_argument(
         "--bridges",
         action="store_true",
         help=(
-            "Run prompts/02b_discovery_bridges.md over combined.json and write "
-            "02b_bridges/bridges.json."
+            "Run prompts/02_goals/bridges.md over combined.json and write "
+            "02_goals/bridges/bridges.json."
         ),
     )
     mode_group.add_argument(
         "--questions",
         action="store_true",
         help=(
-            "Run prompts/04_discovery_questions.md once per selected banger "
+            "Run prompts/04_b_to_q/questions.md once per selected banger "
             "opportunity and write question/answer JSON files."
         ),
     )
@@ -57,8 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--bangers",
         action="store_true",
         help=(
-            "Run prompts/03_discovery_bangers.md once per selected element in "
-            "combined.json and write suggestion JSON files."
+            "Run prompts/03_bangers/bangers.md once per selected banger input "
+            "and write suggestion JSON files."
         ),
     )
     parser.add_argument(
@@ -97,56 +97,57 @@ def build_parser() -> argparse.ArgumentParser:
         help="Discovery run directory. Defaults to discovery_<provider>_<minutes>m.",
     )
     parser.add_argument(
+        "--interval-range",
+        required=True,
+        help="Inclusive interval range to run, e.g. `0-42`.",
+    )
+    parser.add_argument(
+        "--run-id",
+        help=(
+            "Versioned run id. Defaults to a new timestamp for 02_goals and "
+            "the latest run for downstream stages."
+        ),
+    )
+    parser.add_argument(
+        "--run-root",
+        help="Explicit versioned run root. Overrides --run-id path derivation.",
+    )
+    parser.add_argument(
         "--goals-dir",
-        help="Goals output/input directory. Defaults to scoped <discovery-dir>/01_goals.",
+        help="Goals output/input directory. Defaults to <run-root>/02_goals/goals.",
     )
     parser.add_argument(
         "--combined-dir",
-        help="Combined goals directory. Defaults to scoped <discovery-dir>/02a_combined.",
+        help="Combined goals directory. Defaults to <run-root>/02_goals/combined.",
     )
     parser.add_argument(
         "--bridges-dir",
-        help="Bridge goals directory. Defaults to scoped <discovery-dir>/02b_bridges.",
+        help="Bridge goals directory. Defaults to <run-root>/02_goals/bridges.",
     )
     parser.add_argument(
         "--suggestion-inputs-dir",
         help=(
-            "Banger suggestion input directory. Defaults to scoped "
-            "<discovery-dir>/02c_suggestion_inputs."
+            "Banger suggestion input directory. Defaults to <run-root>/03_bangers."
         ),
     )
     parser.add_argument(
         "--bangers-dir",
-        help="Bangers directory. Defaults to scoped <discovery-dir>/03_bangers.",
+        help="Bangers directory. Defaults to <run-root>/03_bangers.",
     )
     parser.add_argument(
         "--questions-dir",
-        help="Questions directory. Defaults to scoped <discovery-dir>/04_questions.",
+        help="Questions directory. Defaults to <run-root>/04_b_to_q.",
     )
     parser.add_argument(
         "--run-log",
-        help="JSONL run ledger written by this runner. Defaults inside --discovery-dir.",
-    )
-    parser.add_argument(
-        "--interval-indexes",
-        help="Comma-separated interval indexes or ranges to run, e.g. `0,3,10-12`.",
-    )
-    parser.add_argument(
-        "--days",
-        "--day",
-        dest="days",
-        help=(
-            "Comma-separated zero-based day numbers or ranges to run and scope "
-            "outputs, e.g. `0` or `0-4`. Days are derived from interval row "
-            "start dates."
-        ),
+        help="JSONL run ledger written by this runner. Defaults inside --run-root.",
     )
     parser.add_argument(
         "--banger-input-indexes",
         dest="banger_input_indexes",
         help=(
             "With --bangers or --questions, comma-separated zero-based "
-            "indexes or ranges in 02c_suggestion_inputs/inputs.json to run, "
+            "indexes or ranges in 03_bangers/inputs.json to run, "
             "e.g. `0,3,10-12`."
         ),
     )
@@ -154,7 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--combined-indexes",
         dest="banger_input_indexes",
         help=(
-            "Deprecated alias for --banger-input-indexes."
+            "Comma-separated zero-based banger input indexes or ranges."
         ),
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
@@ -212,7 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help=(
-            "With --bangers, number of 02c suggestion inputs to include in each "
+            "With --bangers, number of banger inputs to include in each "
             "agent run. Defaults to 1 for one range-named output file per run."
         ),
     )
@@ -410,50 +411,61 @@ def normalize_args(args: argparse.Namespace) -> None:
     if args.intervals is None:
         args.intervals = default_intervals_path(interval_minutes)
 
+    args.interval_minutes = interval_minutes
     if args.discovery_dir:
         args.discovery_dir = Path(args.discovery_dir)
     else:
-        args.discovery_dir = default_discovery_dir(
-            args.provider,
-            interval_minutes,
-        )
+        args.discovery_dir = default_discovery_dir(args.provider, interval_minutes)
 
     args.scope_slug = scope_slug(args)
+    if args.run_root:
+        args.run_root = Path(args.run_root)
+        args.run_id = args.run_id or args.run_root.name
+    else:
+        if args.run_id:
+            run_id = args.run_id
+        elif not (args.combine or args.bridges or args.bangers or args.questions):
+            run_id = new_run_id()
+        else:
+            run_id = latest_run_id(args.discovery_dir, args.scope_slug)
+        args.run_id = run_id
+        args.run_root = run_root_for(args.discovery_dir, args.scope_slug, run_id)
+
     args.goals_dir = (
         Path(args.goals_dir)
         if args.goals_dir
-        else scoped_stage_dir(args.discovery_dir, "01_goals", args.scope_slug)
+        else args.run_root / "02_goals" / "goals"
     )
     args.combined_dir = (
         Path(args.combined_dir)
         if args.combined_dir
-        else scoped_stage_dir(args.discovery_dir, "02a_combined", args.scope_slug)
+        else args.run_root / "02_goals" / "combined"
     )
     args.bridges_dir = (
         Path(args.bridges_dir)
         if args.bridges_dir
-        else scoped_stage_dir(args.discovery_dir, "02b_bridges", args.scope_slug)
+        else args.run_root / "02_goals" / "bridges"
     )
     args.suggestion_inputs_dir = (
         Path(args.suggestion_inputs_dir)
         if args.suggestion_inputs_dir
-        else scoped_stage_dir(args.discovery_dir, "02c_suggestion_inputs", args.scope_slug)
+        else args.run_root / "03_bangers"
     )
     args.bangers_dir = (
         Path(args.bangers_dir)
         if args.bangers_dir
-        else scoped_stage_dir(args.discovery_dir, "03_bangers", args.scope_slug)
+        else args.run_root / "03_bangers"
     )
     args.questions_dir = (
         Path(args.questions_dir)
         if args.questions_dir
-        else scoped_stage_dir(args.discovery_dir, "04_questions", args.scope_slug)
+        else args.run_root / "04_b_to_q"
     )
 
     if args.run_log:
         args.run_log = Path(args.run_log)
     else:
-        args.run_log = args.discovery_dir / f"{args.provider}_exec_runs.jsonl"
+        args.run_log = args.run_root / f"{args.provider}_exec_runs.jsonl"
 
     if args.claude_stream:
         args.claude_output_format = "stream-json"
@@ -465,6 +477,7 @@ def normalize_args(args: argparse.Namespace) -> None:
 
     args.intervals = args.intervals.resolve()
     args.discovery_dir = args.discovery_dir.resolve()
+    args.run_root = args.run_root.resolve()
     args.goals_dir = args.goals_dir.resolve()
     args.combined_dir = args.combined_dir.resolve()
     args.bridges_dir = args.bridges_dir.resolve()

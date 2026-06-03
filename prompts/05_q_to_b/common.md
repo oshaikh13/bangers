@@ -1,7 +1,8 @@
 # Task
 
-Generate Q/A pairs for a user-model training set. This is pipeline `20`:
-pre-banger QA for timing-sensitive proactive intervention.
+Generate Q/A pairs for a user-model training set. This is stage `05_q_to_b`:
+pre-banger QA for timing-sensitive proactive intervention, using banger seed
+rankings produced by `03_bangers`.
 
 The user model will see only:
 

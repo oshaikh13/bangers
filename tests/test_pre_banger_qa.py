@@ -13,17 +13,14 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from discovery.pre_banger_qa import (
     enrich_seed_filter_file,
-    ensure_daily_seed_filter_file,
     final_pre_banger_qa_path,
     load_pre_banger_qa_template,
     load_seed_filter,
     load_seed_filter_template,
-    merge_daily_seed_filters,
     parse_args,
     parse_qa_types,
     ranked_seed_metadata,
     sample_pre_banger_seeds,
-    seed_ranking_day,
     select_filtered_seeds,
     validate_seed_filter_data,
     validate_pre_banger_qa_data,
@@ -48,25 +45,35 @@ class PreBangerQATests(unittest.TestCase):
         )
 
     def test_default_pair_budgets_are_reduced(self) -> None:
-        args = parse_args([])
+        args = parse_args(["--interval-range", "0-0", "--run-root", "/tmp/run"])
 
         self.assertEqual(args.pairs_per_run, 3)
         self.assertEqual(args.threaded_pairs_per_run, 10)
 
+    def test_rank_only_force_regenerates_seed_ranking(self) -> None:
+        args = parse_args(
+            [
+                "--interval-range",
+                "0-0",
+                "--run-root",
+                "/tmp/run",
+                "--rank-only",
+                "--force",
+            ]
+        )
+
+        self.assertTrue(args.force_seed_filter)
+
     def test_interval_runs_use_interval_scoped_paths(self) -> None:
-        args = parse_args(["--interval-indexes", "40-49"])
+        args = parse_args(["--interval-range", "40-49", "--run-root", "/tmp/run"])
 
-        self.assertEqual(args.bangers_dir.name, "intervals_40-49")
-        self.assertEqual(args.pre_banger_qa_dir.name, "intervals_40-49")
-        self.assertEqual(args.seed_filter_path.name, "seed_rankings.json")
-        self.assertEqual(args.combined_bangers_path.name, "combined_bangers.json")
-
-    def test_day_runs_use_day_scoped_seed_ranking_path(self) -> None:
-        args = parse_args(["--day", "0-2"])
-
-        self.assertEqual(args.bangers_dir.name, "days_0-2")
-        self.assertEqual(args.pre_banger_qa_dir.name, "days_0-2")
-        self.assertEqual(args.seed_filter_path.name, "seed_rankings.json")
+        self.assertEqual(args.scope_slug, "intervals_40-49")
+        self.assertEqual(args.bangers_dir, Path("/tmp/run/03_bangers").resolve())
+        self.assertEqual(args.pre_banger_qa_dir, Path("/tmp/run/05_q_to_b").resolve())
+        self.assertEqual(
+            args.seed_filter_path,
+            Path("/tmp/run/03_bangers/seed_rankings.json").resolve(),
+        )
         self.assertEqual(args.combined_bangers_path.name, "combined_bangers.json")
         self.assertEqual(final_pre_banger_qa_path(args).name, "final_qa.json")
 
@@ -86,7 +93,7 @@ class PreBangerQATests(unittest.TestCase):
             },
         ]
         args = SimpleNamespace(
-            seed_filter_template=REPO_ROOT / "prompts" / "20_pre_banger_filter.md"
+            seed_filter_template=REPO_ROOT / "prompts" / "03_bangers" / "rank_bangers.md"
         )
         template = load_seed_filter_template(args)
         prompt = render_pre_banger_seed_filter_prompt(
@@ -100,8 +107,8 @@ class PreBangerQATests(unittest.TestCase):
         self.assertIn("intervention_value_now", prompt)
         self.assertIn("/tmp/combined_bangers.json", prompt)
         self.assertIn("top-level `seeds` array", prompt)
-        self.assertIn("one daily batch", prompt)
-        self.assertIn("compare against seeds from other days", prompt)
+        self.assertIn("one interval-range run", prompt)
+        self.assertIn("stage `03_bangers`", prompt)
         self.assertIn("Include every candidate seed exactly once", prompt)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -183,86 +190,6 @@ class PreBangerQATests(unittest.TestCase):
             ],
         )
 
-    def test_daily_seed_rankings_are_concatenated_with_within_day_metadata(self) -> None:
-        all_seeds = [
-            {
-                "seed_id": "day1_low",
-                "banger_timestamp": "2026-04-06T20:38:44.439Z",
-                "suggestion": "Lower value on day one.",
-            },
-            {
-                "seed_id": "day1_high",
-                "banger_timestamp": "2026-04-06T20:39:49.366Z",
-                "suggestion": "Higher value on day one.",
-            },
-            {
-                "seed_id": "day2_only",
-                "banger_timestamp": "2026-04-07T00:01:00Z",
-                "suggestion": "Only value on day two.",
-            },
-        ]
-        self.assertEqual(seed_ranking_day(all_seeds[0]), "2026-04-06")
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp = Path(tmp_dir)
-            day1_path = tmp / "seed_rankings_2026-04-06.json"
-            day2_path = tmp / "seed_rankings_2026-04-07.json"
-            output_path = tmp / "seed_rankings.json"
-            day1_path.write_text(
-                json.dumps(
-                    {
-                        "seeds": [
-                            _ranked_seed("day1_high", 1, "none"),
-                            _ranked_seed("day1_low", 2, "self_done"),
-                        ]
-                    }
-                ),
-                encoding="utf-8",
-            )
-            day2_path.write_text(
-                json.dumps({"seeds": [_ranked_seed("day2_only", 1, "none")]}),
-                encoding="utf-8",
-            )
-
-            merge_daily_seed_filters(
-                [
-                    ("2026-04-06", all_seeds[:2], day1_path),
-                    ("2026-04-07", all_seeds[2:], day2_path),
-                ],
-                all_seeds,
-                output_path,
-            )
-            selected = load_seed_filter(output_path, all_seeds)
-            persisted = json.loads(output_path.read_text(encoding="utf-8"))
-
-        self.assertEqual(
-            [seed["seed_id"] for seed in selected],
-            ["day1_high", "day1_low", "day2_only"],
-        )
-        self.assertEqual(selected[0]["ranking_metadata"]["rank"], 1)
-        self.assertEqual(selected[0]["ranking_metadata"]["day_rank"], 1)
-        self.assertEqual(selected[0]["ranking_metadata"]["day_rank_count"], 2)
-        self.assertEqual(selected[0]["ranking_metadata"]["rank_count"], 2)
-        self.assertEqual(selected[0]["ranking_metadata"]["value_estimate"], 100)
-        self.assertEqual(selected[1]["ranking_metadata"]["day_rank"], 2)
-        self.assertEqual(selected[1]["ranking_metadata"]["value_estimate"], 1)
-        self.assertEqual(selected[2]["ranking_metadata"]["rank"], 3)
-        self.assertEqual(selected[2]["ranking_metadata"]["day_rank_count"], 1)
-        self.assertEqual(selected[2]["ranking_metadata"]["value_estimate"], 100)
-        self.assertEqual(persisted["rank_scope"], "utc_day")
-        self.assertEqual(
-            [seed["rank_day"] for seed in persisted["seeds"]],
-            ["2026-04-06", "2026-04-06", "2026-04-07"],
-        )
-
-    def test_existing_non_daily_seed_ranking_is_stale(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            path = Path(tmp_dir) / "seed_rankings.json"
-            path.write_text(json.dumps({"seeds": []}), encoding="utf-8")
-
-            with self.assertRaisesRegex(RuntimeError, "daily ranking"):
-                ensure_daily_seed_filter_file(path)
-
     def test_ranked_seed_metadata_derives_continuous_value_estimate(self) -> None:
         self.assertEqual(
             ranked_seed_metadata({"rank": 1, "seed_id": "only"}, 1)["value_estimate"],
@@ -281,7 +208,7 @@ class PreBangerQATests(unittest.TestCase):
         self.assertEqual(last["rank_percentile"], 0.0)
         self.assertEqual(last["value_estimate"], 1)
 
-    def test_select_filtered_seeds_combines_interval_and_start_limit(self) -> None:
+    def test_select_filtered_seeds_applies_start_limit(self) -> None:
         seeds = [
             {
                 "seed_id": "first",
@@ -299,21 +226,16 @@ class PreBangerQATests(unittest.TestCase):
                 "banger_timestamp": "2026-04-08T18:00:00Z",
             },
         ]
-        interval_rows = [
-            {
-                "interval_index": 45,
-                "start_ts": 1775665424.439826,
-                "end_ts": 1775666324.439826,
-            }
-        ]
         args = SimpleNamespace(
             seed_ids=None,
             banger_input_indexes=None,
             start=1,
             limit=1,
+            seed_sample_fraction=1.0,
+            seed_sample_seed="seed",
         )
 
-        selected = select_filtered_seeds(args, seeds, interval_rows)
+        selected = select_filtered_seeds(args, seeds)
 
         self.assertEqual([seed["seed_id"] for seed in selected], ["second"])
 
@@ -378,12 +300,21 @@ class PreBangerQATests(unittest.TestCase):
 
     def test_parse_rejects_invalid_seed_sample_fraction(self) -> None:
         with self.assertRaisesRegex(SystemExit, "seed-sample-fraction"):
-            parse_args(["--seed-sample-fraction", "0"])
+            parse_args(
+                [
+                    "--interval-range",
+                    "0-0",
+                    "--run-root",
+                    "/tmp/run",
+                    "--seed-sample-fraction",
+                    "0",
+                ]
+            )
 
     def test_load_and_render_prompt_includes_hidden_seed_and_context(self) -> None:
         args = SimpleNamespace(
-            common_template=REPO_ROOT / "prompts" / "20_pre_banger_common.md",
-            prompts_dir=REPO_ROOT / "prompts",
+            common_template=REPO_ROOT / "prompts" / "05_q_to_b" / "common.md",
+            prompts_dir=REPO_ROOT / "prompts" / "05_q_to_b",
         )
         template = load_pre_banger_qa_template(args, "curiosity")
         context = [_context_event()]
@@ -407,8 +338,8 @@ class PreBangerQATests(unittest.TestCase):
 
     def test_value_prompt_requires_1_to_100_estimate_and_anti_leak_rules(self) -> None:
         args = SimpleNamespace(
-            common_template=REPO_ROOT / "prompts" / "20_pre_banger_common.md",
-            prompts_dir=REPO_ROOT / "prompts",
+            common_template=REPO_ROOT / "prompts" / "05_q_to_b" / "common.md",
+            prompts_dir=REPO_ROOT / "prompts" / "05_q_to_b",
         )
         template = load_pre_banger_qa_template(args, "value")
 
@@ -459,7 +390,7 @@ class PreBangerQATests(unittest.TestCase):
 
     def test_write_final_pre_banger_qa_consolidates_supported_type_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            pre_banger_dir = Path(tmp_dir) / "20_pre_banger_qa"
+            pre_banger_dir = Path(tmp_dir) / "05_q_to_b"
             curiosity_dir = pre_banger_dir / "curiosity"
             value_dir = pre_banger_dir / "value"
             threaded_dir = pre_banger_dir / "threaded"
@@ -480,7 +411,7 @@ class PreBangerQATests(unittest.TestCase):
             )
 
             write_final_pre_banger_qa(
-                SimpleNamespace(pre_banger_qa_dir=pre_banger_dir, interval_indexes=None)
+                SimpleNamespace(pre_banger_qa_dir=pre_banger_dir)
             )
 
             final_data = json.loads((pre_banger_dir / "final_qa.json").read_text())
@@ -492,7 +423,7 @@ class PreBangerQATests(unittest.TestCase):
 
     def test_write_final_pre_banger_qa_uses_scoped_final_filename(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            pre_banger_dir = Path(tmp_dir) / "20_pre_banger_qa"
+            pre_banger_dir = Path(tmp_dir) / "05_q_to_b"
             flat_dir = pre_banger_dir / "timing"
             flat_dir.mkdir(parents=True)
             (flat_dir / "qa_29_0_0.json").write_text(
@@ -501,7 +432,6 @@ class PreBangerQATests(unittest.TestCase):
             )
             args = SimpleNamespace(
                 pre_banger_qa_dir=pre_banger_dir,
-                interval_indexes="40-49",
             )
 
             write_final_pre_banger_qa(args)
@@ -527,7 +457,7 @@ class PreBangerQATests(unittest.TestCase):
         self.assertEqual(rows[-1]["thread_id"], 2)
 
     def test_threaded_prompt_requires_coherent_thread_arcs(self) -> None:
-        prompt_text = (REPO_ROOT / "prompts" / "20_pre_banger_threaded.md").read_text(
+        prompt_text = (REPO_ROOT / "prompts" / "05_q_to_b" / "threaded.md").read_text(
             encoding="utf-8"
         )
 
@@ -583,7 +513,7 @@ def _ranked_seed(seed_id: str, rank: int, negative_reason: str) -> dict:
         "disregard": 4,
         "grounding": 8,
         "self_done_penalty": 2 if negative_reason == "none" else 9,
-        "timing_reason": "The timing is assessed for this day.",
+        "timing_reason": "The timing is assessed for this run.",
         "marginal_value_reason": "The assistant's marginal value is estimated.",
         "self_done_reason": "The user may or may not do it themselves.",
         "future_check": "Future logs are used to calibrate the label.",
