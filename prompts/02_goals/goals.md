@@ -426,7 +426,7 @@ Use this exact schema:
 ]
 
 Rules for the JSON:
-- Produce exactly 20 goals.
+- Produce exactly 10 goals.
 - Every candidate must describe one specific user goal.
 - Generate goals across the confidence range.
 - Every candidate must include an execution timestamp.
