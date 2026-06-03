@@ -123,7 +123,7 @@ class QuestionContextTests(unittest.TestCase):
 
             write_final_questions(args, [suggestion], indexed_events)
 
-            final_data = json.loads((questions_dir / "final_questions.json").read_text())
+            final_data = json.loads((questions_dir / "final_qa.json").read_text())
             self.assertEqual(final_data[0]["context_events"][0]["text"], "event")
             self.assertEqual(final_data[0]["questions"]["context_events"][0]["text"], "event")
 

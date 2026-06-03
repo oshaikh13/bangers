@@ -13,8 +13,8 @@ from discovery.question_context import training_rows_from_final_questions
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_FINAL_QUESTIONS = (
-    REPO_ROOT / "discovery_codex_15m" / "04_b_to_q" / "final_questions.json"
+DEFAULT_FINAL_QA = (
+    REPO_ROOT / "discovery_codex_15m" / "04_b_to_q" / "final_qa.json"
 )
 
 
@@ -28,11 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input",
         type=Path,
-        default=DEFAULT_FINAL_QUESTIONS,
+        default=DEFAULT_FINAL_QA,
         help=(
-            "Path to final_questions.json, a question_*.json file, or a "
+            "Path to final_qa.json, a question_*.json file, or a "
             "04_b_to_q directory. Defaults to discovery_codex_15m/04_b_to_q/"
-            "final_questions.json."
+            "final_qa.json."
         ),
     )
     parser.add_argument(
@@ -48,9 +48,6 @@ def load_question_items(path: Path) -> list[dict[str, Any]]:
         final_qa_path = path / "final_qa.json"
         if final_qa_path.exists():
             return load_question_items(final_qa_path)
-        final_path = path / "final_questions.json"
-        if final_path.exists():
-            return load_question_items(final_path)
         generic_qa_paths = sorted(path.glob("*/qa_*.json"))
         if generic_qa_paths:
             return [

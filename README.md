@@ -54,7 +54,7 @@ discovery_codex_15m/
   intervals_0-42/RUN_ID/03_bangers/inputs.json
   intervals_0-42/RUN_ID/03_bangers/combined_bangers.json
   intervals_0-42/RUN_ID/03_bangers/seed_rankings.json
-  intervals_0-42/RUN_ID/04_b_to_q/final_questions.json
+  intervals_0-42/RUN_ID/04_b_to_q/final_qa.json
   intervals_0-42/RUN_ID/05_q_to_b/final_qa.json
 ```
 

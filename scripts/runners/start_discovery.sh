@@ -262,7 +262,7 @@ run_b_to_q() {
     --continue-on-error
 
   uv run scripts/export_training_questions.py \
-    --input "$run_root/04_b_to_q/final_questions.json" \
+    --input "$run_root/04_b_to_q/final_qa.json" \
     --output "$run_root/04_b_to_q/training_questions.jsonl"
 }
 

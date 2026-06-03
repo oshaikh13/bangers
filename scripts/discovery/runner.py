@@ -1626,11 +1626,11 @@ def write_final_questions(
             }
         )
 
-    final_path = args.questions_dir / "final_questions.json"
+    final_path = args.questions_dir / "final_qa.json"
     tmp = final_path.with_name(f".{final_path.name}.tmp.{os.getpid()}")
     tmp.write_text(json.dumps(final_items, indent=2, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, final_path)
-    print(f"wrote final questions -> {final_path}", file=sys.stderr)
+    print(f"wrote final QA -> {final_path}", file=sys.stderr)
 
 
 def run_questions(args: argparse.Namespace) -> int:
