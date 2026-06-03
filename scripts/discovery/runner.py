@@ -1360,6 +1360,7 @@ def attach_question_context(
 
 
 def write_json_atomically(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
     try:
         tmp.write_text(
