@@ -406,7 +406,7 @@ Example 15: Travel planning
 
 ## Required output
 
-Write 20 possible goals to the exact JSON file path provided by the runner.
+Write 10 possible goals to the exact JSON file path provided by the runner.
 
 Rank them primarily from most useful to least useful, but use confidence as a guardrail: a high-usefulness guess with weak evidence should rank below goals that are both useful and well-supported.
 
