@@ -20,47 +20,35 @@ from discovery.generic_qa import (
     validate_generic_qa_data,
     write_final_generic_qa,
 )
-from discovery.intervals import interval_indexes_for_days, select_rows
+from discovery.intervals import interval_range_indexes, select_rows
 from discovery.prompts import render_generic_qa_prompt
 from discovery.question_context import training_rows_from_final_questions
 
 
 class GenericQATests(unittest.TestCase):
-    def test_select_rows_accepts_zero_based_day_ranges(self) -> None:
+    def test_select_rows_accepts_interval_range(self) -> None:
         rows = [
-            {
-                "interval_index": 0,
-                "start_local": "2026-04-06T00:00:00-07:00",
-            },
-            {
-                "interval_index": 1,
-                "start_local": "2026-04-06T00:15:00-07:00",
-            },
-            {
-                "interval_index": 2,
-                "start_local": "2026-04-07T00:00:00-07:00",
-            },
-            {
-                "interval_index": 3,
-                "start_local": "2026-04-08T00:00:00-07:00",
-            },
+            {"interval_index": 0},
+            {"interval_index": 1},
+            {"interval_index": 2},
+            {"interval_index": 3},
         ]
 
-        self.assertEqual(interval_indexes_for_days(rows, "0"), {0, 1})
-        self.assertEqual(interval_indexes_for_days(rows, "1-2"), {2, 3})
+        self.assertEqual(interval_range_indexes("1-2"), {1, 2})
         self.assertEqual(
-            [row["interval_index"] for row in select_rows(rows, None, "0-1", 0, None)],
-            [0, 1, 2],
+            [row["interval_index"] for row in select_rows(rows, "1-3", 0, None)],
+            [1, 2, 3],
         )
         self.assertEqual(
-            [row["interval_index"] for row in select_rows(rows, "1-3", "1", 0, None)],
+            [row["interval_index"] for row in select_rows(rows, "1-3", 1, 1)],
             [2],
         )
 
-    def test_day_alias_uses_day_scoped_final_path(self) -> None:
-        args = parse_args(["--day", "0-2"])
+    def test_interval_range_uses_q_only_scoped_final_path(self) -> None:
+        args = parse_args(["--interval-range", "0-2"])
 
-        self.assertEqual(args.generic_qa_dir.name, "days_0-2")
+        self.assertEqual(args.generic_qa_dir.parent.name, "01_q_only")
+        self.assertEqual(args.generic_qa_dir.name, "intervals_0-2")
         self.assertEqual(final_generic_qa_path(args).name, "final_qa.json")
 
     def test_parse_qa_types_expands_all_and_dedupes_specific_types(self) -> None:
@@ -72,7 +60,7 @@ class GenericQATests(unittest.TestCase):
         )
 
     def test_default_pairs_per_run_is_two(self) -> None:
-        self.assertEqual(parse_args([]).pairs_per_run, 2)
+        self.assertEqual(parse_args(["--interval-range", "0-0"]).pairs_per_run, 2)
 
     def test_context_for_interval_uses_latest_100_events_before_end_ts(self) -> None:
         events = [
@@ -95,8 +83,8 @@ class GenericQATests(unittest.TestCase):
 
     def test_load_and_render_prompt_includes_type_interval_and_context(self) -> None:
         args = SimpleNamespace(
-            common_template=REPO_ROOT / "prompts" / "10_generic_qa_common.md",
-            prompts_dir=REPO_ROOT / "prompts",
+            common_template=REPO_ROOT / "prompts" / "01_q_only" / "common.md",
+            prompts_dir=REPO_ROOT / "prompts" / "01_q_only",
         )
         template = load_generic_qa_template(args, "activity_window")
         row = {"interval_index": 0, "end_ts": 1.0, "end_utc": "2026-01-01T00:00:01Z"}
@@ -127,8 +115,8 @@ class GenericQATests(unittest.TestCase):
 
     def test_load_and_render_verbatim_textbox_prompt(self) -> None:
         args = SimpleNamespace(
-            common_template=REPO_ROOT / "prompts" / "10_generic_qa_common.md",
-            prompts_dir=REPO_ROOT / "prompts",
+            common_template=REPO_ROOT / "prompts" / "01_q_only" / "common.md",
+            prompts_dir=REPO_ROOT / "prompts" / "01_q_only",
         )
         template = load_generic_qa_template(args, "verbatim_textbox")
         row = {"interval_index": 0, "end_ts": 1.0, "end_utc": "2026-01-01T00:00:01Z"}
@@ -189,7 +177,7 @@ class GenericQATests(unittest.TestCase):
 
     def test_write_final_generic_qa_consolidates_completed_type_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            generic_qa_dir = Path(tmp_dir) / "10_generic_qa"
+            generic_qa_dir = Path(tmp_dir) / "01_q_only"
             type_dir = generic_qa_dir / "activity_window"
             type_dir.mkdir(parents=True)
             (type_dir / "qa_0.json").write_text(

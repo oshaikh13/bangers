@@ -14,7 +14,7 @@ from discovery.question_context import training_rows_from_final_questions
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FINAL_QUESTIONS = (
-    REPO_ROOT / "discovery_codex_15m" / "04_questions" / "final_questions.json"
+    REPO_ROOT / "discovery_codex_15m" / "04_b_to_q" / "final_questions.json"
 )
 
 
@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_FINAL_QUESTIONS,
         help=(
             "Path to final_questions.json, a question_*.json file, or a "
-            "04_questions directory. Defaults to discovery_codex_15m/04_questions/"
+            "04_b_to_q directory. Defaults to discovery_codex_15m/04_b_to_q/"
             "final_questions.json."
         ),
     )

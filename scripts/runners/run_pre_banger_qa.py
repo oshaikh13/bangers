@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run pipeline 20 cool pre-banger QA generation."""
+"""Run 05_q_to_b pre-banger QA generation."""
 
 from __future__ import annotations
 

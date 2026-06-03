@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from discovery.scoping import scoped_stage_dir, scope_slug
+from discovery.scoping import latest_run_id, run_root_for, scope_slug, update_run_manifest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -35,35 +35,39 @@ def parse_args() -> argparse.Namespace:
         "--combined",
         type=Path,
         help=(
-            "Path to combined.json. Defaults to scoped "
-            "<discovery-dir>/02a_combined/combined.json."
+            "Path to combined.json. Defaults to <run-root>/02_goals/combined/combined.json."
         ),
     )
     parser.add_argument(
         "--bridges",
         type=Path,
         help=(
-            "Path to bridges.json. Defaults to scoped "
-            "<discovery-dir>/02b_bridges/bridges.json."
+            "Path to bridges.json. Defaults to <run-root>/02_goals/bridges/bridges.json."
         ),
     )
     parser.add_argument(
         "--output",
         type=Path,
-        help=(
-            "Output path. Defaults to scoped "
-            "<discovery-dir>/02c_suggestion_inputs/inputs.json."
-        ),
+        help="Output path. Defaults to <run-root>/03_bangers/inputs.json.",
     )
     parser.add_argument(
-        "--interval-indexes",
-        help="Scope defaults to an interval selector, e.g. `2-42`.",
+        "--interval-range",
+        required=True,
+        help="Inclusive interval range for run lookup, e.g. `2-42`.",
     )
     parser.add_argument(
-        "--days",
-        "--day",
-        dest="days",
-        help="Scope defaults to a zero-based day selector, e.g. `1` or `0-2`.",
+        "--run-id",
+        help="Run id. Defaults to latest run for the interval range.",
+    )
+    parser.add_argument(
+        "--run-root",
+        type=Path,
+        help="Explicit run root. Overrides --run-id path derivation.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Accepted for runner consistency; this script always rewrites output.",
     )
     return parser.parse_args()
 
@@ -252,17 +256,25 @@ def main() -> int:
     args = parse_args()
     discovery_dir = args.discovery_dir.resolve()
     slug = scope_slug(args)
+    if args.run_root:
+        run_root = args.run_root.resolve()
+        args.run_id = args.run_id or run_root.name
+    else:
+        run_id = args.run_id or latest_run_id(discovery_dir, slug)
+        args.run_id = run_id
+        run_root = run_root_for(discovery_dir, slug, run_id).resolve()
+    args.run_root = run_root
     combined_path = (
         args.combined
-        or scoped_stage_dir(discovery_dir, "02a_combined", slug) / "combined.json"
+        or run_root / "02_goals" / "combined" / "combined.json"
     ).resolve()
     bridges_path = (
         args.bridges
-        or scoped_stage_dir(discovery_dir, "02b_bridges", slug) / "bridges.json"
+        or run_root / "02_goals" / "bridges" / "bridges.json"
     ).resolve()
     output_path = (
         args.output
-        or scoped_stage_dir(discovery_dir, "02c_suggestion_inputs", slug) / "inputs.json"
+        or run_root / "03_bangers" / "inputs.json"
     ).resolve()
 
     if not combined_path.exists():
@@ -279,6 +291,7 @@ def main() -> int:
     inputs = sorted(inputs, key=sort_key)
 
     write_json_atomically(output_path, inputs)
+    update_run_manifest(args, "03_bangers:inputs")
     print(
         f"wrote {len(inputs)} suggestion inputs "
         f"({len(combined)} goals, {len(bridges)} bridges) -> {output_path}"

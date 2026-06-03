@@ -34,7 +34,7 @@ from .runner import (
     create_isolated_workdir,
     write_json_atomically,
 )
-from .scoping import scoped_stage_dir, scope_slug, selector_slug
+from .scoping import interval_range_slug
 
 
 QA_TYPES = (
@@ -74,7 +74,7 @@ class GenericQAResult:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run pipeline 10: one-stage generic QA generation with one QA type "
+            "Run 01_q_only: one-stage generic QA generation with one QA type "
             "per model call."
         )
     )
@@ -95,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Input JSONL of interval rows. Defaults to data/log_intervals_<minutes>m.jsonl.",
     )
     parser.add_argument(
+        "--interval-range",
+        required=True,
+        help="Inclusive interval range to run, e.g. `0-42`.",
+    )
+    parser.add_argument(
         "--repo-root",
         default=str(REPO_ROOT),
         help="Working repository passed to the agent CLI.",
@@ -106,8 +111,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--generic-qa-dir",
         help=(
-            "Pipeline 10 output directory. Defaults to scoped "
-            "<discovery-dir>/10_generic_qa."
+            "01_q_only output directory. Defaults to "
+            "<discovery-dir>/01_q_only/intervals_START-END."
         ),
     )
     parser.add_argument(
@@ -117,12 +122,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--common-template",
         default=str(DEFAULT_GENERIC_QA_COMMON_TEMPLATE),
-        help="Shared prompt template for pipeline 10.",
+        help="Shared prompt template for 01_q_only.",
     )
     parser.add_argument(
         "--prompts-dir",
         default=str(DEFAULT_GENERIC_QA_PROMPTS_DIR),
-        help="Directory containing prompts/10_generic_qa_<qa_type>.md files.",
+        help="Directory containing prompts/01_q_only/<qa_type>.md files.",
     )
     parser.add_argument(
         "--qa-types",
@@ -137,19 +142,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_QAS_PER_INTERVAL,
         help="Number of Q/A pairs requested for each interval. Defaults to 2.",
-    )
-    parser.add_argument(
-        "--interval-indexes",
-        help="Comma-separated interval indexes or ranges to run, e.g. `0,3,10-12`.",
-    )
-    parser.add_argument(
-        "--days",
-        "--day",
-        dest="days",
-        help=(
-            "Comma-separated zero-based day numbers or ranges to run, e.g. "
-            "`0` or `0-4`. Days are derived from interval row start dates."
-        ),
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
     parser.add_argument("--limit", type=int, help="Maximum number of interval rows to run.")
@@ -249,11 +241,11 @@ def normalize_args(args: argparse.Namespace) -> None:
         if args.discovery_dir
         else default_discovery_dir(args.provider, interval_minutes)
     ).resolve()
-    args.scope_slug = scope_slug(args)
+    args.scope_slug = interval_range_slug(args.interval_range)
     args.generic_qa_dir = (
         Path(args.generic_qa_dir)
         if args.generic_qa_dir
-        else scoped_stage_dir(args.discovery_dir, "10_generic_qa", args.scope_slug)
+        else args.discovery_dir / "01_q_only" / args.scope_slug
     ).resolve()
     args.run_log = (
         Path(args.run_log)
@@ -279,7 +271,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def qa_type_template_path(args: argparse.Namespace, qa_type: str) -> Path:
-    return args.prompts_dir / f"10_generic_qa_{qa_type}.md"
+    return args.prompts_dir / f"{qa_type}.md"
 
 
 def load_generic_qa_template(args: argparse.Namespace, qa_type: str) -> str:
@@ -592,26 +584,20 @@ def remove_stale_final_if_needed(path: Path) -> None:
         path.unlink()
 
 
-def interval_indexes_slug(raw: str) -> str:
-    return selector_slug(raw)
-
-
 def final_generic_qa_path(args: argparse.Namespace) -> Path:
     return args.generic_qa_dir / "final_qa.json"
 
 
 def selected_final_interval_indexes(args: argparse.Namespace) -> set[int] | None:
-    interval_indexes = getattr(args, "interval_indexes", None)
-    days = getattr(args, "days", None)
+    interval_range = getattr(args, "interval_range", None)
     intervals = getattr(args, "intervals", None)
-    if not interval_indexes and not days:
+    if not interval_range:
         return None
     if intervals is None:
         return None
     rows = select_rows(
         read_jsonl(intervals),
-        interval_indexes,
-        days,
+        interval_range,
         getattr(args, "start", 0),
         getattr(args, "limit", None),
     )
@@ -669,8 +655,7 @@ def run(args: argparse.Namespace) -> int:
 
     rows = select_rows(
         read_jsonl(args.intervals),
-        args.interval_indexes,
-        args.days,
+        args.interval_range,
         args.start,
         args.limit,
     )

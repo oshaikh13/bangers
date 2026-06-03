@@ -2,8 +2,8 @@
 
 Generate generic Q/A pairs for a user-model training set.
 
-This is pipeline `10` (`1.0`): one stage, one QA type per run. The target QA
-type for this run is:
+This is stage `01_q_only`: one generic QA type per run. The target QA type for
+this run is:
 
 `{qa_type}`
 

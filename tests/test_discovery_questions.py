@@ -23,6 +23,7 @@ from discovery.runner import (
     sample_question_suggestions,
     validate_questions_data,
     write_final_questions,
+    write_json_atomically,
 )
 
 
@@ -78,6 +79,14 @@ class QuestionContextTests(unittest.TestCase):
         self.assertIn('"text": "event"', prompt)
         self.assertIn("/tmp/question.json", prompt)
 
+    def test_write_json_atomically_creates_parent_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "nested" / "output.json"
+
+            write_json_atomically(path, {"ok": True})
+
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"ok": True})
+
     def test_validate_questions_rejects_missing_context_basis(self) -> None:
         data = _valid_questions_payload()
         data["threads"][0]["qa_pairs"][0]["question_basis"]["context_event_indexes"] = [3]
@@ -87,7 +96,7 @@ class QuestionContextTests(unittest.TestCase):
 
     def test_write_final_questions_preserves_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            questions_dir = Path(tmp_dir) / "04_questions"
+            questions_dir = Path(tmp_dir) / "04_b_to_q"
             questions_dir.mkdir()
             path = questions_dir / "question_0_0_0.json"
             data = _valid_questions_payload()
@@ -145,6 +154,10 @@ class QuestionContextTests(unittest.TestCase):
             args = parse_args(
                 [
                     "--questions",
+                    "--interval-range",
+                    "0-0",
+                    "--run-root",
+                    str(Path(tmp_dir) / "run"),
                     "--bangers-dir",
                     str(bangers_dir),
                     "--questions-sample-fraction",
@@ -161,6 +174,10 @@ class QuestionContextTests(unittest.TestCase):
                 parse_args(
                     [
                         "--questions",
+                        "--interval-range",
+                        "0-0",
+                        "--run-root",
+                        str(Path(tmp_dir) / "run"),
                         "--bangers-dir",
                         str(bangers_dir),
                         "--questions-sample-fraction",
@@ -177,7 +194,17 @@ class QuestionContextTests(unittest.TestCase):
 
     def test_parse_rejects_invalid_question_sample_fraction(self) -> None:
         with self.assertRaisesRegex(SystemExit, "questions-sample-fraction"):
-            parse_args(["--questions", "--questions-sample-fraction", "0"])
+            parse_args(
+                [
+                    "--questions",
+                    "--interval-range",
+                    "0-0",
+                    "--run-root",
+                    "/tmp/run",
+                    "--questions-sample-fraction",
+                    "0",
+                ]
+            )
 
     def test_training_export_omits_metadata(self) -> None:
         rows = training_rows_from_final_questions(

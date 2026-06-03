@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from discovery.banger_manifest import write_combined_bangers_file
-from discovery.scoping import scoped_stage_dir, scope_slug
+from discovery.scoping import latest_run_id, run_root_for, scope_slug, update_run_manifest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help=(
             "Directory containing bangers_*.json files. Defaults to "
-            "scoped <discovery-dir>/03_bangers."
+            "<run-root>/03_bangers."
         ),
     )
     parser.add_argument(
@@ -55,14 +55,23 @@ def parse_args() -> argparse.Namespace:
         help="JSON output path. Defaults to combined_bangers.json in the bangers directory.",
     )
     parser.add_argument(
-        "--interval-indexes",
-        help="Scope defaults to an interval selector, e.g. `2-42`.",
+        "--interval-range",
+        required=True,
+        help="Inclusive interval range for run lookup, e.g. `2-42`.",
     )
     parser.add_argument(
-        "--days",
-        "--day",
-        dest="days",
-        help="Scope defaults to a zero-based day selector, e.g. `1` or `0-2`.",
+        "--run-id",
+        help="Run id. Defaults to latest run for the interval range.",
+    )
+    parser.add_argument(
+        "--run-root",
+        type=Path,
+        help="Explicit run root. Overrides --run-id path derivation.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Accepted for runner consistency; this script always rewrites output.",
     )
     return parser.parse_args()
 
@@ -237,9 +246,18 @@ def render_markdown(opportunities: list[dict[str, Any]]) -> str:
 def main() -> int:
     args = parse_args()
     slug = scope_slug(args)
+    discovery_dir = args.discovery_dir.resolve()
+    if args.run_root:
+        run_root = args.run_root.resolve()
+        args.run_id = args.run_id or run_root.name
+    else:
+        run_id = args.run_id or latest_run_id(discovery_dir, slug)
+        args.run_id = run_id
+        run_root = run_root_for(discovery_dir, slug, run_id).resolve()
+    args.run_root = run_root
     bangers_dir = (
         args.bangers_dir
-        or scoped_stage_dir(args.discovery_dir, "03_bangers", slug)
+        or run_root / "03_bangers"
     ).resolve()
     if not bangers_dir.exists():
         raise SystemExit(f"bangers directory not found: {bangers_dir}")
@@ -250,6 +268,7 @@ def main() -> int:
     opportunities = load_opportunities(bangers_dir)
     combined = write_combined_bangers_file(json_output, bangers_dir)
     write_text_atomically(output, render_markdown(opportunities) + "\n")
+    update_run_manifest(args, "03_bangers:combine")
     missing = sum(1 for item in opportunities if item["sort_timestamp"] is None)
     print(
         f"wrote {len(opportunities)} opportunities -> {output}"

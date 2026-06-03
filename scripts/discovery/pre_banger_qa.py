@@ -8,15 +8,19 @@ import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .agent_job import agent_log_paths, cleanup_isolated_workdir, run_agent_job
+from .agent_job import (
+    agent_log_paths,
+    cleanup_isolated_workdir,
+    copy_file_atomically,
+    run_agent_job,
+)
 from .banger_manifest import write_combined_bangers_file
 from .cli import add_claude_args, add_codex_args
-from .intervals import interval_indexes_for_days, parse_interval_indexes
-from .io import append_jsonl, read_jsonl
+from .intervals import parse_interval_indexes
+from .io import append_jsonl
 from .paths import (
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_PRE_BANGER_QA_COMMON_TEMPLATE,
@@ -24,7 +28,6 @@ from .paths import (
     DEFAULT_PRE_BANGER_SEED_FILTER_TEMPLATE,
     REPO_ROOT,
     default_discovery_dir,
-    default_intervals_path,
 )
 from .prompts import (
     load_template,
@@ -43,7 +46,7 @@ from .runner import (
     create_isolated_workdir,
     write_json_atomically,
 )
-from .scoping import scoped_stage_dir, scope_slug, selector_slug
+from .scoping import latest_run_id, run_root_for, scope_slug, update_run_manifest
 
 
 QA_TYPES = (
@@ -90,8 +93,9 @@ class SeedFilterResult:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run pipeline 20: cool pre-banger QA generation over "
-            "prompt-ranked historical banger seeds."
+            "Run 05_q_to_b: pre-banger QA generation over "
+            "prompt-ranked historical banger seeds, or use --rank-only for "
+            "the 03_bangers seed-ranking step."
         )
     )
     parser.add_argument(
@@ -106,9 +110,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Interval size used to derive the default discovery directory.",
     )
     parser.add_argument(
-        "--intervals",
-        type=Path,
-        help="Input JSONL of interval rows. Defaults to data/log_intervals_<minutes>m.jsonl.",
+        "--interval-range",
+        required=True,
+        help="Inclusive interval range for run lookup, e.g. `0-42`.",
+    )
+    parser.add_argument(
+        "--run-id",
+        help="Run id. Defaults to latest run for the interval range.",
+    )
+    parser.add_argument(
+        "--run-root",
+        help="Explicit run root. Overrides --run-id path derivation.",
     )
     parser.add_argument(
         "--repo-root",
@@ -122,8 +134,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bangers-dir",
         help=(
-            "Directory containing 03_bangers output. Defaults to scoped "
-            "<discovery-dir>/03_bangers."
+            "Directory containing 03_bangers output. Defaults to "
+            "<run-root>/03_bangers."
         ),
     )
     parser.add_argument(
@@ -136,18 +148,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--pre-banger-qa-dir",
         help=(
-            "Pipeline 20 output directory. Defaults to "
-            "scoped <discovery-dir>/20_pre_banger_qa."
+            "05_q_to_b output directory. Defaults to <run-root>/05_q_to_b."
         ),
     )
     parser.add_argument(
         "--run-log",
-        help="JSONL run ledger. Defaults inside --discovery-dir.",
+        help="JSONL run ledger. Defaults inside --run-root.",
     )
     parser.add_argument(
         "--common-template",
         default=str(DEFAULT_PRE_BANGER_QA_COMMON_TEMPLATE),
-        help="Shared prompt template for pipeline 20.",
+        help="Shared prompt template for 05_q_to_b.",
     )
     parser.add_argument(
         "--seed-filter-template",
@@ -158,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--seed-filter-path",
         help=(
             "JSON file containing prompt-ranked seeds. Defaults to "
-            "<pre-banger-qa-dir>/seed_rankings.json."
+            "<bangers-dir>/seed_rankings.json."
         ),
     )
     parser.add_argument(
@@ -167,9 +178,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Regenerate the prompt-ranked seed file even if it exists.",
     )
     parser.add_argument(
+        "--rank-only",
+        action="store_true",
+        help="Only rank banger seeds and write seed_rankings.json; do not generate QA.",
+    )
+    parser.add_argument(
         "--prompts-dir",
         default=str(DEFAULT_PRE_BANGER_QA_PROMPTS_DIR),
-        help="Directory containing prompts/20_pre_banger_<qa_type>.md files.",
+        help="Directory containing prompts/05_q_to_b/<qa_type>.md files.",
     )
     parser.add_argument(
         "--qa-types",
@@ -201,28 +217,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--banger-input-indexes",
         dest="banger_input_indexes",
-        help="Comma-separated 02c banger input indexes or ranges to include.",
+        help="Comma-separated 03_bangers input indexes or ranges to include.",
     )
     parser.add_argument(
         "--combined-indexes",
         dest="banger_input_indexes",
-        help="Deprecated alias for --banger-input-indexes.",
-    )
-    parser.add_argument(
-        "--interval-indexes",
-        help=(
-            "Comma-separated interval indexes or ranges to include. A seed is "
-            "included when its banger_timestamp falls inside one of these intervals."
-        ),
-    )
-    parser.add_argument(
-        "--days",
-        "--day",
-        dest="days",
-        help=(
-            "Comma-separated zero-based day numbers or ranges to include, e.g. "
-            "`0` or `0-4`. Days are derived from interval row start dates."
-        ),
+        help="Comma-separated zero-based banger input indexes or ranges.",
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset after ranking.")
     parser.add_argument("--limit", type=int, help="Maximum number of ranked seeds to run.")
@@ -247,7 +247,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Run even if the expected qa_<seed_id>.json output exists.",
+        help=(
+            "Run even if the expected qa_<seed_id>.json output exists. "
+            "With --rank-only, regenerate seed_rankings.json."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -335,25 +338,12 @@ def banger_input_indexes_arg(args: argparse.Namespace) -> str | None:
     )
 
 
-def interval_indexes_slug(raw: str) -> str:
-    return selector_slug(raw)
-
-
-def default_seed_filter_path(pre_banger_qa_dir: Path) -> Path:
-    return pre_banger_qa_dir / "seed_rankings.json"
+def default_seed_filter_path(bangers_dir: Path) -> Path:
+    return bangers_dir / "seed_rankings.json"
 
 
 def scoped_seed_filter_path(args: argparse.Namespace) -> Path:
-    return default_seed_filter_path(args.pre_banger_qa_dir)
-
-
-def daily_seed_filter_dir(args: argparse.Namespace) -> Path:
-    path = seed_filter_path(args)
-    return path.with_name(f"{path.stem}_daily")
-
-
-def daily_combined_bangers_dir(args: argparse.Namespace) -> Path:
-    return args.pre_banger_qa_dir / "seed_ranking_inputs"
+    return default_seed_filter_path(args.bangers_dir)
 
 
 def normalize_args(args: argparse.Namespace) -> None:
@@ -380,21 +370,24 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--startup-progress-every must be non-negative")
 
     args.repo_root = Path(args.repo_root).resolve()
-    args.intervals = (
-        Path(args.intervals)
-        if args.intervals is not None
-        else default_intervals_path(interval_minutes)
-    ).resolve()
     args.discovery_dir = (
         Path(args.discovery_dir)
         if args.discovery_dir
         else default_discovery_dir(args.provider, interval_minutes)
     ).resolve()
+    args.interval_minutes = interval_minutes
     args.scope_slug = scope_slug(args)
+    if args.run_root:
+        args.run_root = Path(args.run_root).resolve()
+        args.run_id = args.run_id or args.run_root.name
+    else:
+        run_id = args.run_id or latest_run_id(args.discovery_dir, args.scope_slug)
+        args.run_id = run_id
+        args.run_root = run_root_for(args.discovery_dir, args.scope_slug, run_id).resolve()
     args.bangers_dir = (
         Path(args.bangers_dir)
         if args.bangers_dir
-        else scoped_stage_dir(args.discovery_dir, "03_bangers", args.scope_slug)
+        else args.run_root / "03_bangers"
     ).resolve()
     args.combined_bangers_path = (
         Path(args.combined_bangers_path)
@@ -404,12 +397,12 @@ def normalize_args(args: argparse.Namespace) -> None:
     args.pre_banger_qa_dir = (
         Path(args.pre_banger_qa_dir)
         if args.pre_banger_qa_dir
-        else scoped_stage_dir(args.discovery_dir, "20_pre_banger_qa", args.scope_slug)
+        else args.run_root / "05_q_to_b"
     ).resolve()
     args.run_log = (
         Path(args.run_log)
         if args.run_log
-        else args.discovery_dir / f"{args.provider}_exec_runs.jsonl"
+        else args.run_root / f"{args.provider}_exec_runs.jsonl"
     ).resolve()
     args.common_template = Path(args.common_template).resolve()
     args.seed_filter_template = Path(args.seed_filter_template).resolve()
@@ -421,6 +414,8 @@ def normalize_args(args: argparse.Namespace) -> None:
     args.prompts_dir = Path(args.prompts_dir).resolve()
     args.qa_types = parse_qa_types(args.qa_types)
     args.seed_ids = parse_seed_ids(args.seed_ids)
+    if args.rank_only and args.force:
+        args.force_seed_filter = True
 
     if args.claude_stream:
         args.claude_output_format = "stream-json"
@@ -437,7 +432,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def qa_type_template_path(args: argparse.Namespace, qa_type: str) -> Path:
-    return args.prompts_dir / f"20_pre_banger_{qa_type}.md"
+    return args.prompts_dir / f"{qa_type}.md"
 
 
 def load_pre_banger_qa_template(args: argparse.Namespace, qa_type: str) -> str:
@@ -463,77 +458,6 @@ def agent_qa_path(agent_workdir: Path, qa_type: str, seed_id: str) -> Path:
     return agent_workdir / "agent-output" / qa_type / f"qa_{seed_id}.json"
 
 
-def load_interval_filter_rows(args: argparse.Namespace) -> list[dict[str, Any]] | None:
-    interval_indexes = getattr(args, "interval_indexes", None)
-    days = getattr(args, "days", None)
-    intervals = getattr(args, "intervals", None)
-    selected_indexes = parse_interval_indexes(interval_indexes)
-    if intervals is None:
-        return None
-    if not intervals.exists() and (selected_indexes is not None or days):
-        raise SystemExit(f"interval JSONL not found: {args.intervals}")
-
-    day_indexes: set[int] | None = None
-    interval_rows: list[dict[str, Any]] | None = None
-    if days:
-        interval_rows = read_jsonl(intervals)
-        day_indexes = interval_indexes_for_days(interval_rows, days)
-
-    if selected_indexes is not None and day_indexes is not None:
-        selected_indexes &= day_indexes
-    elif day_indexes is not None:
-        selected_indexes = day_indexes
-
-    if selected_indexes is None:
-        return None
-    if not intervals.exists():
-        raise SystemExit(f"interval JSONL not found: {args.intervals}")
-
-    if interval_rows is None:
-        interval_rows = read_jsonl(intervals)
-    rows = [
-        row
-        for row in interval_rows
-        if isinstance(row.get("interval_index"), int)
-        and row["interval_index"] in selected_indexes
-    ]
-    if not rows:
-        print("no interval rows selected", file=sys.stderr)
-    return rows
-
-
-def interval_bounds(row: dict[str, Any]) -> tuple[float, float]:
-    start_ts = parse_timestamp(row.get("start_ts"))
-    if start_ts is None:
-        start_ts = parse_timestamp(row.get("start_utc") or row.get("start_local"))
-    end_ts = parse_timestamp(row.get("end_ts"))
-    if end_ts is None:
-        end_ts = parse_timestamp(row.get("end_utc") or row.get("end_local"))
-    if start_ts is None or end_ts is None:
-        raise RuntimeError(f"could not parse interval bounds: {row}")
-    return start_ts, end_ts
-
-
-def seed_in_interval_rows(seed: dict[str, Any], rows: list[dict[str, Any]]) -> bool:
-    seed_ts = parse_timestamp(seed.get("banger_timestamp"))
-    if seed_ts is None:
-        return False
-    for row in rows:
-        start_ts, end_ts = interval_bounds(row)
-        if start_ts <= seed_ts <= end_ts:
-            return True
-    return False
-
-
-def filter_seeds_by_interval_rows(
-    seeds: list[dict[str, Any]],
-    rows: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]]:
-    if rows is None:
-        return seeds
-    return [seed for seed in seeds if seed_in_interval_rows(seed, rows)]
-
-
 def seed_filter_path(args: argparse.Namespace) -> Path:
     return args.seed_filter_path
 
@@ -553,72 +477,6 @@ def prepare_agent_seed_filter_input(
     agent_input_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(input_path, agent_input_path)
     return agent_input_path
-
-
-def seed_ranking_day(seed: dict[str, Any]) -> str:
-    seed_ts = parse_timestamp(seed.get("banger_timestamp"))
-    if seed_ts is None:
-        return "undated"
-    return datetime.fromtimestamp(seed_ts, tz=timezone.utc).date().isoformat()
-
-
-def grouped_seeds_by_day(
-    seeds: list[dict[str, Any]],
-) -> list[tuple[str, list[dict[str, Any]]]]:
-    groups: dict[str, list[dict[str, Any]]] = {}
-    for seed in seeds:
-        groups.setdefault(seed_ranking_day(seed), []).append(seed)
-
-    def sort_key(item: tuple[str, list[dict[str, Any]]]) -> tuple[int, str]:
-        day, _ = item
-        return (1, day) if day == "undated" else (0, day)
-
-    return sorted(groups.items(), key=sort_key)
-
-
-def daily_seed_filter_path(args: argparse.Namespace, day: str) -> Path:
-    return daily_seed_filter_dir(args) / f"seed_rankings_{day}.json"
-
-
-def daily_combined_bangers_path(args: argparse.Namespace, day: str) -> Path:
-    return daily_combined_bangers_dir(args) / f"combined_bangers_{day}.json"
-
-
-def write_daily_combined_bangers_file(
-    args: argparse.Namespace,
-    combined_bangers: dict[str, Any],
-    day: str,
-    seeds: list[dict[str, Any]],
-) -> Path:
-    path = daily_combined_bangers_path(args, day)
-    write_json_atomically(
-        path,
-        {
-            "source_bangers_dir": combined_bangers.get("source_bangers_dir"),
-            "source_bangers_files": combined_bangers.get("source_bangers_files", []),
-            "seed_count": len(seeds),
-            "rank_scope": "utc_day",
-            "rank_day": day,
-            "seeds": seeds,
-        },
-    )
-    return path
-
-
-def write_daily_combined_bangers_files(
-    args: argparse.Namespace,
-    combined_bangers: dict[str, Any],
-) -> list[tuple[str, list[dict[str, Any]], Path, Path]]:
-    batches: list[tuple[str, list[dict[str, Any]], Path, Path]] = []
-    for day, seeds in grouped_seeds_by_day(combined_bangers["seeds"]):
-        input_path = write_daily_combined_bangers_file(
-            args,
-            combined_bangers,
-            day,
-            seeds,
-        )
-        batches.append((day, seeds, input_path, daily_seed_filter_path(args, day)))
-    return batches
 
 
 def load_seed_filter_template(args: argparse.Namespace) -> str:
@@ -774,63 +632,8 @@ def enrich_seed_filter_file(path: Path, all_seeds: list[dict[str, Any]]) -> None
         write_json_atomically(path, enriched)
 
 
-def ensure_daily_seed_filter_file(path: Path) -> None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise SystemExit(f"pre-banger seed ranking not found: {path}") from None
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"pre-banger seed ranking is not valid JSON: {path}: {exc}") from exc
-    if not isinstance(data, dict) or data.get("rank_scope") != "utc_day":
-        raise RuntimeError(
-            f"existing pre-banger seed ranking was not generated with daily ranking: {path}"
-        )
-
-
-def merge_daily_seed_filters(
-    daily_items: list[tuple[str, list[dict[str, Any]], Path]],
-    all_seeds: list[dict[str, Any]],
-    output_path: Path,
-) -> None:
-    merged: list[dict[str, Any]] = []
-    global_rank = 1
-    for day, day_seeds, path in daily_items:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            raise SystemExit(f"pre-banger daily seed ranking not found: {path}") from None
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"pre-banger daily seed ranking is not valid JSON: {path}: {exc}"
-            ) from exc
-        validate_seed_filter_data(data, day_seeds, path)
-        data = enrich_seed_filter_data(data, day_seeds)
-
-        ranked_day_seeds = sorted(data["seeds"], key=lambda item: item["rank"])
-        day_rank_count = len(ranked_day_seeds)
-        for ranked_seed in ranked_day_seeds:
-            seed = dict(ranked_seed)
-            seed["rank_day"] = day
-            seed["day_rank"] = seed["rank"]
-            seed["day_rank_count"] = day_rank_count
-            seed["global_rank"] = global_rank
-            seed["global_rank_count"] = len(all_seeds)
-            seed["rank"] = global_rank
-            merged.append(seed)
-            global_rank += 1
-
-    data = {
-        "rank_scope": "utc_day",
-        "seeds": merged,
-    }
-    validate_seed_filter_data(data, all_seeds, output_path)
-    write_json_atomically(output_path, data)
-    enrich_seed_filter_file(output_path, all_seeds)
-
-
 def ranked_seed_metadata(seed: dict[str, Any], rank_count: int) -> dict[str, Any]:
-    rank = seed.get("day_rank", seed["rank"])
-    rank_count = seed.get("day_rank_count", rank_count)
+    rank = seed["rank"]
     if rank_count <= 1:
         rank_percentile = 100.0
     else:
@@ -877,31 +680,34 @@ def print_seed_filter_dry_run(
     *,
     input_path: Path | None = None,
     output_path: Path | None = None,
-    rank_day: str | None = None,
 ) -> None:
     output_path = output_path or seed_filter_path(args)
     input_path = input_path or args.combined_bangers_path
     isolated_workdir: Path | None = None
     if args.no_isolate_agent_workdir:
         agent_workdir = args.repo_root
+        agent_input_path = input_path
         agent_output_path = output_path
     else:
         agent_workdir = create_isolated_workdir(args, "pre-banger-seed-filter")
         isolated_workdir = agent_workdir
+        agent_input_path = agent_workdir / "agent-input" / "combined_bangers.json"
+        copy_file_atomically(input_path, agent_input_path)
         agent_output_path = agent_seed_filter_path(agent_workdir)
     agent_output_path.parent.mkdir(parents=True, exist_ok=True)
 
     provider = build_provider_command(args, agent_workdir)
     prompt = render_pre_banger_seed_filter_prompt(
         template,
-        input_path,
+        agent_input_path,
         agent_output_path,
         provider.name,
     )
-    print("\n--- pre-banger seed ranking" + (f" {rank_day}" if rank_day else "") + " ---")
+    print("\n--- pre-banger seed ranking ---")
     print(f"seed ranking path: {output_path}")
     print(f"combined bangers path: {input_path}")
     print(f"candidate seeds: {len(all_seeds)}")
+    print(f"agent combined bangers path: {agent_input_path}")
     print(f"agent seed ranking path: {agent_output_path}")
     print(f"agent workdir: {agent_workdir}")
     print(f"{provider.name} command:", " ".join(provider.command))
@@ -920,20 +726,22 @@ def run_seed_filter_once(
     *,
     input_path: Path | None = None,
     output_path: Path | None = None,
-    rank_day: str | None = None,
 ) -> SeedFilterResult:
     output_path = output_path or seed_filter_path(args)
     input_path = input_path or args.combined_bangers_path
     isolated_workdir: Path | None = None
     if args.no_isolate_agent_workdir:
         agent_workdir = args.repo_root
+        agent_input_path = input_path
         agent_output_path = output_path
     else:
         agent_workdir = create_isolated_workdir(args, "pre-banger-seed-filter")
         isolated_workdir = agent_workdir
+        agent_input_path = agent_workdir / "agent-input" / "combined_bangers.json"
+        copy_file_atomically(input_path, agent_input_path)
         agent_output_path = agent_seed_filter_path(agent_workdir)
 
-    log_stem = "seed_filter" if rank_day is None else f"seed_filter_{rank_day}"
+    log_stem = "seed_filter"
     stdout_path, stderr_path = agent_log_paths(
         args.pre_banger_qa_dir,
         log_stem,
@@ -941,7 +749,7 @@ def run_seed_filter_once(
     )
     prompt = render_pre_banger_seed_filter_prompt(
         template,
-        input_path,
+        agent_input_path,
         agent_output_path,
         args.provider,
     )
@@ -952,15 +760,8 @@ def run_seed_filter_once(
         prompt=prompt,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
-        prefix=(
-            f"{args.provider}:pre-banger-seed-filter"
-            + (f":{rank_day}" if rank_day else "")
-        ),
-        log_message=(
-            "pre-banger seed ranking"
-            + (f" {rank_day}" if rank_day else "")
-            + f" -> {output_path}"
-        ),
+        prefix=f"{args.provider}:pre-banger-seed-filter",
+        log_message=f"pre-banger seed ranking -> {output_path}",
         output_path=output_path,
         agent_output_path=agent_output_path,
     )
@@ -972,8 +773,7 @@ def run_seed_filter_once(
     record = {
         "provider": job.provider.name,
         "mode": "pre_banger_seed_ranking",
-        "rank_scope": "utc_day" if rank_day else "all",
-        "rank_day": rank_day,
+        "rank_scope": "run",
         "discovery_dir": str(args.discovery_dir),
         "bangers_dir": str(args.bangers_dir),
         "combined_bangers_path": str(input_path),
@@ -1005,9 +805,8 @@ def run_seed_filter_once(
 def select_filtered_seeds(
     args: argparse.Namespace,
     filtered: list[dict[str, Any]],
-    interval_rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    selected = filter_seeds_by_interval_rows(filtered, interval_rows)
+    selected = list(filtered)
     if args.seed_ids is not None:
         selected = [seed for seed in selected if seed.get("seed_id") in args.seed_ids]
 
@@ -1372,15 +1171,12 @@ def final_pre_banger_qa_path(args: argparse.Namespace) -> Path:
 
 def write_final_pre_banger_qa(args: argparse.Namespace) -> None:
     final_items: list[dict[str, Any]] = []
-    interval_rows = load_interval_filter_rows(args)
     for qa_type, seed_id, path in iter_pre_banger_qa_files(args.pre_banger_qa_dir):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"pre-banger QA output is not valid JSON: {path}: {exc}") from exc
         validate_pre_banger_qa_data(data, path)
-        if interval_rows is not None and not seed_in_interval_rows(data, interval_rows):
-            continue
         final_items.append(
             {
                 "qa_type": qa_type,
@@ -1423,40 +1219,26 @@ def run(args: argparse.Namespace) -> int:
     all_seeds = combined_bangers["seeds"]
     if not all_seeds:
         raise SystemExit(f"no banger seeds found in {args.bangers_dir}")
-    interval_rows = load_interval_filter_rows(args)
-    ranking_seeds = (
-        filter_seeds_by_interval_rows(all_seeds, interval_rows)
-        if args.days and interval_rows is not None
-        else all_seeds
-    )
+    ranking_seeds = all_seeds
     if not ranking_seeds:
         print("no pre-banger seeds selected for ranking", file=sys.stderr)
         return 0
-    ranking_combined_bangers = {
-        **combined_bangers,
-        "seed_count": len(ranking_seeds),
-        "seeds": ranking_seeds,
-    }
-    daily_batches = write_daily_combined_bangers_files(args, ranking_combined_bangers)
 
     seed_filter_template = load_seed_filter_template(args)
     if args.dry_run and (args.force_seed_filter or not seed_filter_path(args).exists()):
-        for day, day_seeds, input_path, output_path in daily_batches:
-            print_seed_filter_dry_run(
-                args,
-                seed_filter_template,
-                day_seeds,
-                input_path=input_path,
-                output_path=output_path,
-                rank_day=day,
-            )
+        print_seed_filter_dry_run(
+            args,
+            seed_filter_template,
+            ranking_seeds,
+            input_path=args.combined_bangers_path,
+            output_path=seed_filter_path(args),
+        )
         return 0
 
     ranked: list[dict[str, Any]] | None = None
     needs_seed_ranking = args.force_seed_filter or not seed_filter_path(args).exists()
     if not needs_seed_ranking:
         try:
-            ensure_daily_seed_filter_file(seed_filter_path(args))
             if not args.dry_run:
                 enrich_seed_filter_file(seed_filter_path(args), all_seeds)
             data = json.loads(seed_filter_path(args).read_text(encoding="utf-8"))
@@ -1473,61 +1255,40 @@ def run(args: argparse.Namespace) -> int:
             needs_seed_ranking = True
 
     if needs_seed_ranking:
-        completed_daily: list[tuple[str, list[dict[str, Any]], Path]] = []
-        with ThreadPoolExecutor(max_workers=args.jobs) as executor:
-            future_to_batch = {
-                executor.submit(
-                    run_seed_filter_once,
-                    args,
-                    seed_filter_template,
-                    day_seeds,
-                    input_path=input_path,
-                    output_path=output_path,
-                    rank_day=day,
-                ): (day, day_seeds, output_path)
-                for day, day_seeds, input_path, output_path in daily_batches
-            }
-            for future in as_completed(future_to_batch):
-                day, day_seeds, output_path = future_to_batch[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    print(
-                        f"pre-banger seed ranking {day} failed: {exc}",
-                        file=sys.stderr,
-                    )
-                    for pending in future_to_batch:
-                        pending.cancel()
-                    return 1
-
-                append_jsonl(args.run_log, result.record)
-                if result.returncode != 0:
-                    print(
-                        f"pre-banger seed ranking {day} failed with exit code "
-                        f"{result.returncode}; see {result.stderr_path}",
-                        file=sys.stderr,
-                    )
-                    for pending in future_to_batch:
-                        pending.cancel()
-                    return result.returncode
-                if not result.created_output:
-                    print(
-                        f"pre-banger seed ranking {day} completed but did not "
-                        f"create {result.output_path}",
-                        file=sys.stderr,
-                    )
-                    for pending in future_to_batch:
-                        pending.cancel()
-                    return 1
-                completed_daily.append((day, day_seeds, output_path))
-
-        completed_daily.sort(key=lambda item: (item[0] == "undated", item[0]))
-        merge_daily_seed_filters(completed_daily, ranking_seeds, seed_filter_path(args))
+        result = run_seed_filter_once(
+            args,
+            seed_filter_template,
+            ranking_seeds,
+            input_path=args.combined_bangers_path,
+            output_path=seed_filter_path(args),
+        )
+        append_jsonl(args.run_log, result.record)
+        if result.returncode != 0:
+            print(
+                f"pre-banger seed ranking failed with exit code "
+                f"{result.returncode}; see {result.stderr_path}",
+                file=sys.stderr,
+            )
+            return result.returncode
+        if not result.created_output:
+            print(
+                f"pre-banger seed ranking completed but did not create "
+                f"{result.output_path}",
+                file=sys.stderr,
+            )
+            return 1
         ranked = load_seed_filter(seed_filter_path(args), all_seeds)
 
     if ranked is None:
         ranked = load_seed_filter(seed_filter_path(args), all_seeds)
-    seeds = select_filtered_seeds(args, ranked, interval_rows)
+    if args.rank_only:
+        print(f"candidate banger seeds: {len(all_seeds)}", file=sys.stderr)
+        print(f"prompt-ranked banger seeds: {len(ranked)}", file=sys.stderr)
+        print(f"seed rankings path: {seed_filter_path(args)}", file=sys.stderr)
+        update_run_manifest(args, "03_bangers:rank")
+        return 0
+
+    seeds = select_filtered_seeds(args, ranked)
     if not seeds:
         print("no pre-banger seeds selected", file=sys.stderr)
         return 0
@@ -1545,9 +1306,6 @@ def run(args: argparse.Namespace) -> int:
     ]
 
     print(f"candidate pre-banger seeds: {len(all_seeds)}", file=sys.stderr)
-    print(f"pre-banger ranking days: {len(daily_batches)}", file=sys.stderr)
-    if interval_rows is not None:
-        print(f"selected intervals: {len(interval_rows)}", file=sys.stderr)
     print(f"prompt-ranked pre-banger seeds: {len(ranked)}", file=sys.stderr)
     print(f"selected pre-banger seeds: {len(seeds)}", file=sys.stderr)
     print(
@@ -1594,6 +1352,7 @@ def run(args: argparse.Namespace) -> int:
 
     if not selected_to_run:
         write_final_pre_banger_qa(args)
+        update_run_manifest(args, "05_q_to_b")
         return 0
 
     failures = 0
@@ -1653,6 +1412,7 @@ def run(args: argparse.Namespace) -> int:
     if failures:
         return 1
     write_final_pre_banger_qa(args)
+    update_run_manifest(args, "05_q_to_b")
     return 0
 
 

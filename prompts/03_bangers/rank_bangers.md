@@ -1,6 +1,7 @@
 # Task
 
-You are ranking historical banger seeds for pipeline `20_pre_banger_qa`.
+You are ranking historical banger seeds for stage `03_bangers`, producing the
+ranked seed list consumed by `05_q_to_b`.
 
 The goal is to create a scored seed list that teaches a user model when a
 proactive assistant intervention would have high marginal value for the user.
@@ -24,9 +25,7 @@ Read the combined banger seed file at this path:
 
 The file contains a top-level `seeds` array. Each seed already has its
 canonical `seed_id`, source indexes, original banger metadata, and hidden
-`target_banger`. The runner groups candidates by UTC day before invoking this
-prompt, so rank across every seed in this file as one daily batch. Do not
-compare against seeds from other days.
+`target_banger`. Rank across every seed in this file as one interval-range run.
 
 Each seed includes the original banger scores and metadata. The scores are
 useful hints, not the final answer. You may use subagents to help rank and 
@@ -124,6 +123,6 @@ Write JSON only:
 ```
 
 Include every candidate seed exactly once, best intervention moments first
-within this daily batch. Do not use `keep`, `downrank`, or any binary inclusion
+within this interval-range run. Do not use `keep`, `downrank`, or any binary inclusion
 label. Low-ranked seeds are still useful as negative examples because their QA
 answers should teach the model why the assistant should wait or stay quiet.
