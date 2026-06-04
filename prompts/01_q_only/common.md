@@ -106,7 +106,7 @@ pairs — they are not a multi-turn thread:
 ```
 
 Generate exactly `{pairs_per_run}` Q/A pairs unless fewer are honestly
-groundable. Never generate fewer than 2.
+groundable. Never generate fewer than 3.
 
 `q_id` values must be contiguous from 0.
 

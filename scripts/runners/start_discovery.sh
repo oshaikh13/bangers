@@ -179,6 +179,9 @@ run_setup() {
 }
 
 run_q_only() {
+  # Interval sampling defaults live in run_generic_qa.py: each QA type samples
+  # --interval-sample-fraction (0.10) of the range and asks for --pairs-per-run
+  # (10) Q/A pairs per call. Add those flags here to override (e.g. fraction 1.0).
   run_stage scripts/runners/run_generic_qa.py \
     --provider "$provider" \
     --interval-minutes "$interval_minutes" \

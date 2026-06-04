@@ -632,6 +632,43 @@ def enrich_seed_filter_file(path: Path, all_seeds: list[dict[str, Any]]) -> None
         write_json_atomically(path, enriched)
 
 
+def require_all_ranked_seeds(
+    data: Any,
+    ranking_seeds: list[dict[str, Any]],
+    path: Path | str,
+) -> None:
+    """Ensure an existing seed ranking covers every candidate seed.
+
+    ``validate_seed_filter_data`` only checks that ranked seeds map to known
+    seeds; this adds the reverse completeness check so a ranking produced
+    before new seeds were generated is treated as stale. Raises RuntimeError
+    on any gap so the caller regenerates instead of running on a partial
+    ranking.
+    """
+    if not isinstance(data, dict):
+        raise RuntimeError(f"pre-banger seed ranking output must be a JSON object: {path}")
+    ranked = data.get("seeds")
+    if not isinstance(ranked, list):
+        raise RuntimeError(f"pre-banger seed ranking output must include seeds: {path}")
+    ranked_ids = {
+        seed.get("seed_id")
+        for seed in ranked
+        if isinstance(seed, dict) and isinstance(seed.get("seed_id"), str)
+    }
+    missing = [
+        seed["seed_id"]
+        for seed in ranking_seeds
+        if isinstance(seed.get("seed_id"), str) and seed["seed_id"] not in ranked_ids
+    ]
+    if missing:
+        preview = ", ".join(missing[:10])
+        suffix = "" if len(missing) <= 10 else f" (+{len(missing) - 10} more)"
+        raise RuntimeError(
+            f"pre-banger seed ranking is missing {len(missing)} of "
+            f"{len(ranking_seeds)} ranked seeds ({preview}{suffix}): {path}"
+        )
+
+
 def ranked_seed_metadata(seed: dict[str, Any], rank_count: int) -> dict[str, Any]:
     rank = seed["rank"]
     if rank_count <= 1:

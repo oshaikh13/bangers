@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import random
 import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -55,9 +57,12 @@ QA_TYPES = (
 
 SPARSE_QA_TYPES = frozenset({"verbatim_textbox"})
 
-MIN_QAS_PER_INTERVAL = 2
-MAX_QAS_PER_INTERVAL = 5
-DEFAULT_QAS_PER_INTERVAL = 2
+MIN_QAS_PER_INTERVAL = 3
+MAX_QAS_PER_INTERVAL = 10
+DEFAULT_QAS_PER_INTERVAL = 10
+
+DEFAULT_INTERVAL_SAMPLE_FRACTION = 0.10
+DEFAULT_INTERVAL_SAMPLE_SEED = "0"
 
 
 @dataclass(frozen=True)
@@ -141,7 +146,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--pairs-per-run",
         type=int,
         default=DEFAULT_QAS_PER_INTERVAL,
-        help="Number of Q/A pairs requested for each interval. Defaults to 2.",
+        help="Number of Q/A pairs requested for each interval. Defaults to 10.",
+    )
+    parser.add_argument(
+        "--interval-sample-fraction",
+        type=float,
+        default=DEFAULT_INTERVAL_SAMPLE_FRACTION,
+        help=(
+            "Fraction of intervals in the range to randomly sample per QA type "
+            "before generating questions. Defaults to 0.10; use 1.0 to run every "
+            "interval."
+        ),
+    )
+    parser.add_argument(
+        "--interval-sample-seed",
+        default=DEFAULT_INTERVAL_SAMPLE_SEED,
+        help=(
+            "Seed for deterministic interval sampling. Each QA type derives its "
+            "own subset from this seed. Defaults to '0'."
+        ),
     )
     parser.add_argument("--start", type=int, default=0, help="Start offset.")
     parser.add_argument("--limit", type=int, help="Maximum number of interval rows to run.")
@@ -219,6 +242,25 @@ def parse_qa_types(raw: str) -> list[str]:
     return deduped
 
 
+def sample_intervals(
+    rows: list[dict[str, Any]],
+    fraction: float,
+    seed: str | int | float | bytes | bytearray | None,
+) -> list[dict[str, Any]]:
+    if not rows or fraction >= 1:
+        return rows
+    if fraction <= 0:
+        raise RuntimeError(f"interval sample fraction must be greater than 0: {fraction}")
+
+    sample_size = max(1, math.floor(len(rows) * fraction))
+    if sample_size >= len(rows):
+        return rows
+
+    rng = random.Random(seed)
+    sampled_indexes = set(rng.sample(range(len(rows)), sample_size))
+    return [row for index, row in enumerate(rows) if index in sampled_indexes]
+
+
 def normalize_args(args: argparse.Namespace) -> None:
     interval_minutes = args.interval_minutes or DEFAULT_INTERVAL_MINUTES
     if interval_minutes <= 0:
@@ -229,6 +271,8 @@ def normalize_args(args: argparse.Namespace) -> None:
         raise SystemExit("--pairs-per-run must be greater than 0")
     if args.pairs_per_run > MAX_QAS_PER_INTERVAL:
         raise SystemExit(f"--pairs-per-run must be at most {MAX_QAS_PER_INTERVAL}")
+    if not (0 < args.interval_sample_fraction <= 1):
+        raise SystemExit("--interval-sample-fraction must be greater than 0 and at most 1")
     if args.startup_progress_every < 0:
         raise SystemExit("--startup-progress-every must be non-negative")
 
@@ -672,11 +716,21 @@ def run(args: argparse.Namespace) -> int:
         for qa_type in args.qa_types
     }
 
-    selected: list[tuple[str, dict[str, Any]]] = [
-        (qa_type, row) for row in rows for qa_type in args.qa_types
-    ]
+    selected: list[tuple[str, dict[str, Any]]] = []
+    for qa_type in args.qa_types:
+        type_seed = f"{args.interval_sample_seed}:{qa_type}"
+        type_rows = sample_intervals(rows, args.interval_sample_fraction, type_seed)
+        print(
+            f"sampled intervals[{qa_type}]: {len(type_rows)}",
+            file=sys.stderr,
+        )
+        selected.extend((qa_type, row) for row in type_rows)
 
     print(f"selected intervals: {len(rows)}", file=sys.stderr)
+    print(
+        f"interval sample fraction: {args.interval_sample_fraction}",
+        file=sys.stderr,
+    )
     print(f"selected generic QA runs: {len(selected)}", file=sys.stderr)
     print(f"qa types: {', '.join(args.qa_types)}", file=sys.stderr)
     print(f"provider: {args.provider}", file=sys.stderr)
