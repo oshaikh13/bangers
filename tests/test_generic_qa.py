@@ -161,11 +161,13 @@ class GenericQATests(unittest.TestCase):
             validate_generic_qa_data(data, "qa.json")
 
     def test_validate_generic_qa_rejects_bad_timestamp_grounding(self) -> None:
+        # H answers must verify at or before the cutoff; a verify time clearly
+        # after it is rejected (cutoff is qa_timestamp_ts = 100.0).
         data = _valid_generic_qa_payload()
         data["qa_pairs"][0]["answer_basis"] = "H"
-        data["qa_pairs"][0]["verify_at_ts"] = 100.0
+        data["qa_pairs"][0]["verify_at_ts"] = 101.0
 
-        with self.assertRaisesRegex(RuntimeError, "before qa_timestamp"):
+        with self.assertRaisesRegex(RuntimeError, "at or before qa_timestamp"):
             validate_generic_qa_data(data, "qa.json")
 
         data = _valid_generic_qa_payload()
@@ -174,6 +176,16 @@ class GenericQATests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "at or after qa_timestamp"):
             validate_generic_qa_data(data, "qa.json")
+
+    def test_validate_generic_qa_accepts_h_answer_at_cutoff_instant(self) -> None:
+        # A "right now" hindsight answer verifying at the cutoff instant — incl.
+        # sub-millisecond epoch-float noise past the ms-precision cutoff — must
+        # validate. Regression for the verify_at_ts boundary time bug.
+        data = _valid_generic_qa_payload()
+        data["qa_pairs"][0]["answer_basis"] = "H"
+        data["qa_pairs"][0]["verify_at_ts"] = 100.0004  # cutoff is 100.0
+
+        validate_generic_qa_data(data, "qa.json")
 
     def test_write_final_generic_qa_consolidates_completed_type_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -9,6 +9,13 @@ from .question_context import QUESTION_CONTEXT_EVENT_COUNT, parse_timestamp
 ANSWER_BASES = {"H", "F", "H+F"}
 TIMESCALES = {"micro", "short", "medium", "long"}
 
+# verify_at_ts arrives as an epoch float that can carry sub-millisecond precision,
+# while the cutoff (qa/banger timestamp) comes from a millisecond-precision ISO
+# string. Compare with a 1ms tolerance so a verify time sitting on the cutoff
+# instant is not spuriously read as "after" it. The cutoff instant counts as
+# observable hindsight, so it is valid for H as well as F/H+F.
+VERIFY_TS_TOLERANCE_SECONDS = 1e-3
+
 
 def valid_context_indexes(data: dict[str, Any], path: Path | str, label: str) -> set[int]:
     context_events = data.get("context_events")
@@ -127,12 +134,15 @@ def validate_grounded_pair(
     verify_at_ts = parse_timestamp(pair.get("verify_at_ts"))
     if verify_at_ts is None:
         raise RuntimeError(f"{label} output {location}.verify_at_ts must be parseable: {path}")
-    if answer_basis == "H" and verify_at_ts >= cutoff_ts:
+    if answer_basis == "H" and verify_at_ts > cutoff_ts + VERIFY_TS_TOLERANCE_SECONDS:
         raise RuntimeError(
-            f"{label} output {location}.verify_at_ts must be before "
+            f"{label} output {location}.verify_at_ts must be at or before "
             f"{cutoff_name} for H answers: {path}"
         )
-    if answer_basis in {"F", "H+F"} and verify_at_ts < cutoff_ts:
+    if (
+        answer_basis in {"F", "H+F"}
+        and verify_at_ts < cutoff_ts - VERIFY_TS_TOLERANCE_SECONDS
+    ):
         raise RuntimeError(
             f"{label} output {location}.verify_at_ts must be at or after "
             f"{cutoff_name} for {answer_basis} answers: {path}"
