@@ -12,3 +12,5 @@ data-bak/
 tinker-cookbook/
 tmp_*
 scripts/audit/
+prompts/audit/qa.md
+thoughts.md
