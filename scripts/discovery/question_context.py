@@ -114,7 +114,7 @@ def context_events_for_timestamp(
 
     # Banger timestamps are rendered to millisecond ISO strings, while indexed
     # event floats can keep extra microseconds. Include same-millisecond events.
-    cutoff_ts += 0.001
+    #cutoff_ts += 0.001 ##EDIT: NOPE don't include same-millisecond this will lead to validation error
 
     selected = [
         event

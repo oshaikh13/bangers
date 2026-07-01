@@ -1198,6 +1198,38 @@ def write_final_pre_banger_qa(args: argparse.Namespace) -> None:
     write_json_atomically(final_path, final_items)
     print(f"wrote final pre-banger QA -> {final_path}", file=sys.stderr)
 
+### [reminder] MISSING FUNCTION --> ADDED IT IN ###
+def require_all_ranked_seeds(
+    data: Any,
+    ranking_seeds: list[dict[str, Any]],
+    path: Path | str,
+) -> None:
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"pre-banger seed ranking output must be a JSON object: {path}"
+        )
+
+    seeds = data.get("seeds")
+    if not isinstance(seeds, list):
+        raise RuntimeError(
+            f"pre-banger seed ranking output must include seeds: {path}"
+        )
+
+    expected_seed_ids = {
+        seed.get("seed_id") for seed in ranking_seeds if isinstance(seed.get("seed_id"), str)
+    }
+    ranked_seed_ids = {
+        seed.get("seed_id")
+        for seed in seeds
+        if isinstance(seed, dict) and isinstance(seed.get("seed_id"), str)
+    }
+
+    missing = sorted(expected_seed_ids - ranked_seed_ids)
+    if missing:
+        raise RuntimeError(
+            f"pre-banger seed ranking missing ranked seeds {missing}: {path}"
+        )
+
 
 def cleanup_empty_pre_banger_qa_dirs(args: argparse.Namespace) -> None:
     if not args.pre_banger_qa_dir.exists():
