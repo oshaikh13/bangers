@@ -51,6 +51,7 @@ QA_TYPES = (
     "hypothetical",
     "recall",
     "current_state",
+    "priority", #ADDED CATEGORY
 )
 
 SPARSE_QA_TYPES = frozenset({"verbatim_textbox"})

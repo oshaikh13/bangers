@@ -1198,7 +1198,6 @@ def write_final_pre_banger_qa(args: argparse.Namespace) -> None:
     write_json_atomically(final_path, final_items)
     print(f"wrote final pre-banger QA -> {final_path}", file=sys.stderr)
 
-### [reminder] MISSING FUNCTION --> ADDED IT IN ###
 def require_all_ranked_seeds(
     data: Any,
     ranking_seeds: list[dict[str, Any]],
