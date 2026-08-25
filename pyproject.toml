@@ -1,0 +1,9 @@
+[project]
+name = "bangers"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "tqdm>=4.67.1",
+    "uvicorn[standard]>=0.32.0",
+]

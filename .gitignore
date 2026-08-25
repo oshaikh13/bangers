@@ -1,0 +1,15 @@
+discovery_*
+staging/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+logs-indexed/
+data/
+.env
+.claude/
+data-bak/
+tinker-cookbook/
+tmp_*
+scripts/audit/
+thoughts.md

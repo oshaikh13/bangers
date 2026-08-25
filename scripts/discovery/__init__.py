@@ -1,0 +1,2 @@
+"""Shared discovery runner implementation."""
+
